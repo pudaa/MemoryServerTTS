@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+soundfile
+numpy
+pydantic
+starlette
+transformers==4.57.3
+torch==2.7.0+cu128
+scipy
+gradio
+modelscope
+faster_whisper
+librosa
+fastdtw
+qwen_tts
+g2p-en
+pypinyin
