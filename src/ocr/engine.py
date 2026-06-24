@@ -167,7 +167,8 @@ class OCREngine:
                     if text:
                         lines.append(text)
                         if i < len(rec_boxes):
-                            boxes.append(rec_boxes[i])
+                            box = rec_boxes[i]
+                            boxes.append(box.tolist() if hasattr(box, 'tolist') else list(box))
                         if rec_scores and i < len(rec_scores):
                             confidences.append(float(rec_scores[i]))
 
