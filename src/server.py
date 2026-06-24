@@ -13,6 +13,8 @@ from src.model_loader import TTSModelManager
 from src.asr_model_loader import ASRModelManager
 from src.pronunciation_evaluator import PronunciationEvaluator
 from src.phoneme_evaluator import PhonemeEvaluator
+from src.ocr_engine import OCREngine, SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_DOC_EXTENSIONS
+from src.ocr_config import OCRConfig
 
 import numpy as np
 
@@ -26,6 +28,9 @@ async def startup_event():
     app.state.asr_model = ASRModelManager()
     app.state.pronunciation_evaluator = PronunciationEvaluator()
     app.state.phoneme_evaluator = PhonemeEvaluator(app.state.asr_model)
+    # OCR 引擎延迟加载，配置由 config/ocr_config.yaml 管理
+    app.state.ocr_config = OCRConfig()
+    app.state.ocr_engine = OCREngine(config=app.state.ocr_config)
 
 # 请求模型
 class TTSRequest(BaseModel):
@@ -388,6 +393,136 @@ async def phoneme_score_with_text(
 async def get_asr_models():
     models = app.state.asr_model.get_supported_models()
     return {"models": models}
+
+
+# ═══════════════════════════════════════════════════════════
+# OCR 图片/文档文字识别
+# ═══════════════════════════════════════════════════════════
+
+@app.post("/api/v1/ocr/scan")
+async def ocr_scan_image(
+    image: UploadFile = File(...),
+    language: str | None = Form(None),
+):
+    """
+    扫描图片中的文字 —— 适用于作文/听写结果等场景的图片转文字。
+
+    支持格式: PNG, JPG, JPEG, BMP, TIFF, WEBP
+
+    返回提取的完整文本、逐行文本、置信度等信息。
+    """
+    if image.filename is None:
+        raise HTTPException(status_code=400, detail="image file is required")
+
+    ext = Path(image.filename).suffix.lower()
+    if ext not in SUPPORTED_IMAGE_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported image format: {ext}. Supported: {SUPPORTED_IMAGE_EXTENSIONS}",
+        )
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
+        content = await image.read()
+        temp_file.write(content)
+        temp_path = temp_file.name
+
+    if os.path.getsize(temp_path) == 0:
+        _cleanup_file(temp_path)
+        raise HTTPException(status_code=400, detail="Uploaded image is empty")
+
+    # 动态切换语言（如果有指定）
+    engine: OCREngine = app.state.ocr_engine
+    cfg: OCRConfig = app.state.ocr_config
+    if language and language != cfg.lang:
+        cfg.lang = language
+        engine.reload()
+
+    try:
+        if not engine.ready:
+            engine.load()
+        result = engine.predict_image(temp_path)
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "OCR failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        _cleanup_file(temp_path)
+
+
+@app.post("/api/v1/ocr/scan-file")
+async def ocr_scan_document(
+    file: UploadFile = File(...),
+    language: str | None = Form(None),
+):
+    """
+    扫描文档中的文字（PDF 等）—— 扩展支持。
+
+    支持格式: PDF
+    返回逐页文本及完整合并文本。
+    """
+    if file.filename is None:
+        raise HTTPException(status_code=400, detail="file is required")
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in SUPPORTED_DOC_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported document format: {ext}. Supported: {SUPPORTED_DOC_EXTENSIONS}",
+        )
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
+        content = await file.read()
+        temp_file.write(content)
+        temp_path = temp_file.name
+
+    if os.path.getsize(temp_path) == 0:
+        _cleanup_file(temp_path)
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    engine: OCREngine = app.state.ocr_engine
+    if language and language != engine.lang:
+        engine = OCREngine(engine=engine.engine, lang=language, device=engine.device)
+        engine.load()
+
+    try:
+        if not engine.ready:
+            engine.load()
+
+        if ext == ".pdf":
+            result = engine.predict_pdf(temp_path)
+        else:
+            result = engine.predict_image(temp_path)
+
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "OCR failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        _cleanup_file(temp_path)
+
+
+@app.get("/api/v1/ocr/health")
+async def ocr_health():
+    """OCR 服务健康检查"""
+    engine: OCREngine = app.state.ocr_engine
+    cfg: OCRConfig = app.state.ocr_config
+    return {
+        "ocr_available": engine.ready,
+        "device_actual": engine.actual_device,
+        "config": cfg.summary(),
+        "available_tiers": OCRConfig.available_tiers(),
+        "available_presets": {
+            k: v["desc"] for k, v in OCRConfig.available_presets().items()
+        },
+        "supported_image_formats": list(SUPPORTED_IMAGE_EXTENSIONS),
+        "supported_doc_formats": list(SUPPORTED_DOC_EXTENSIONS),
+    }
 
 
 # 主程序入口，支持 python src/server.py 直接启动

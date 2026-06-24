@@ -1,0 +1,67 @@
+# ═══════════════════════════════════════════════════════════════
+# MemoryServerTTS — OCR 模块配置文件
+# ═══════════════════════════════════════════════════════════════
+#
+# PP-OCRv6 模型档位说明:
+#   tiny    — 最小最快，适合移动端/实时场景，精度略低
+#   small   — 平衡档，速度与精度折中，英语学习场景推荐 ← 当前默认
+#   medium  — 最高精度，适合服务端批量处理，速度较慢
+#
+# 预处理预设说明:
+#   essay     — 作文拍照: orientation + unwarping (方向+透视矫正)
+#   dictation — 听写拍照: orientation + unwarping
+#   document  — 文档扫描: 全部关闭 (已规整)
+#   fast      — 快速模式: 全部关闭，速度优先
+#   full      — 完整模式: 全部开启，精度优先
+# ═══════════════════════════════════════════════════════════════
+
+ocr:
+  # ── 推理引擎 ──
+  engine: onnxruntime          # onnxruntime | paddle_static | transformers
+  device: gpu                  # gpu | cpu
+  lang: en                     # en | ch | Multilingual
+
+  # ── PP-OCR 版本与模型档位 ──
+  ocr_version: PP-OCRv6        # PP-OCR 大版本
+  model_tier: small           # tiny | small | medium
+  # 也可单独指定检测/识别模型名 (覆盖 model_tier):
+  # text_detection_model_name: PP-OCRv6_small_det
+  # text_recognition_model_name: PP-OCRv6_small_rec
+
+  # ── 预处理预设 ──
+  preprocess_preset: essay     # essay | dictation | document | fast | full | null(手动)
+
+  # 手动覆盖 (仅 preprocess_preset=null 时生效):
+  use_doc_orientation_classify: true
+  use_doc_unwarping: true
+  use_textline_orientation: false
+
+  # ── 内置检测参数 ──
+  detection:
+    limit_side_len: 960        # 图像最长边限制 (像素)
+    thresh: 0.3                # 文本检测二值化阈值
+    box_thresh: 0.6            # 文本框过滤阈值
+    unclip_ratio: 1.5          # 文本框膨胀系数
+
+  # ── 性能 ──
+  performance:
+    rec_batch_size: 6          # 识别批处理大小
+    max_concurrency: 1         # 最大并发请求数
+
+# ── 模型档位预设 (参考信息，不直接读取) ──
+model_tiers:
+  tiny:
+    det_model: PP-OCRv6_tiny_det
+    rec_model: PP-OCRv6_tiny_rec
+    desc: "最小模型，适合移动端/实时场景"
+    approx_size_mb: 5
+  small:
+    det_model: PP-OCRv6_small_det
+    rec_model: PP-OCRv6_small_rec
+    desc: "平衡档，速度与精度折中"
+    approx_size_mb: 10
+  medium:
+    det_model: PP-OCRv6_medium_det
+    rec_model: PP-OCRv6_medium_rec
+    desc: "最高精度，适合服务端批量处理"
+    approx_size_mb: 20

@@ -15,3 +15,9 @@ fastdtw
 qwen_tts
 g2p-en
 pypinyin
+
+# ── OCR (PaddleOCR) ──
+# 注意：paddleocr 可能依赖 paddlepaddle，若与 PyTorch 冲突，
+# 建议使用 onnxruntime 引擎，或参考 requirements-ocr.txt 单独安装
+paddleocr
+onnxruntime-gpu
