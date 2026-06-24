@@ -1,23 +1,41 @@
+# ═══════════════════════════════════════════════════════════
+# MemoryServerTTS 依赖
+# 安装: pip install -r requirements.txt
+# ═══════════════════════════════════════════════════════════
+
+# ── Web 框架 ──
 fastapi
 uvicorn
+starlette
+pydantic
+
+# ── 音频处理 ──
 soundfile
 numpy
-pydantic
-starlette
-transformers==4.57.3
-torch==2.7.0+cu128
 scipy
-gradio
-modelscope
-faster_whisper
 librosa
 fastdtw
+
+# ── TTS (Qwen3-TTS 1.7B) ──
+torch==2.7.0+cu128
+transformers==4.57.3
 qwen_tts
+
+# ── ASR (Faster-Whisper) ──
+faster_whisper
+
+# ── 发音评价 (G2P) ──
 g2p-en
 pypinyin
 
+# ── 调试界面 (Gradio) ──
+gradio
+
+# ── 模型下载 ──
+modelscope
+
 # ── OCR (PaddleOCR) ──
-# 注意：paddleocr 可能依赖 paddlepaddle，若与 PyTorch 冲突，
-# 建议使用 onnxruntime 引擎，或参考 requirements-ocr.txt 单独安装
-paddleocr
-onnxruntime-gpu
+# GPU 加速: onnxruntime-gpu 1.21+ + CUDA 12.x
+# ⚠️ 不要升级到 onnxruntime-gpu >=1.27.0（需要 CUDA 13.x）
+paddleocr>=3.0.0
+onnxruntime-gpu>=1.20.0,<1.27.0

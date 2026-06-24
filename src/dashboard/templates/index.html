@@ -1,0 +1,1646 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MemoryServerTTS — 控制面板</title>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!--  Google Fonts + Font Awesome Icons             -->
+<!-- ═══════════════════════════════════════════════ -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+<style>
+/* ═══════════════════════════════════════════════
+   CSS Custom Properties — Light & Dark Themes
+   ═══════════════════════════════════════════════ */
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.04);
+  --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-md: 0 4px 6px rgba(0,0,0,.05), 0 2px 4px rgba(0,0,0,.04);
+  --shadow-lg: 0 10px 15px rgba(0,0,0,.06), 0 4px 6px rgba(0,0,0,.04);
+  --transition: 200ms cubic-bezier(.4,0,.2,1);
+  --transition-slow: 350ms cubic-bezier(.4,0,.2,1);
+}
+
+/* ── Dark Theme (default) ── */
+[data-theme="dark"] {
+  --bg-root: #0b0e14;
+  --bg-surface: #141820;
+  --bg-card: #1a1f2b;
+  --bg-card-hover: #1f2533;
+  --bg-input: #0f131c;
+  --bg-code: #0d1117;
+  --bg-sidebar: #10141d;
+  --border: #252b38;
+  --border-light: #1e2430;
+  --border-focus: #4c8dff;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-tertiary: #5d6675;
+  --accent: #4c8dff;
+  --accent-hover: #3b7be8;
+  --accent-soft: rgba(76,141,255,.10);
+  --green: #3fb950;
+  --green-soft: rgba(63,185,80,.12);
+  --red: #f85149;
+  --red-soft: rgba(248,81,73,.12);
+  --yellow: #d2991d;
+  --yellow-soft: rgba(210,153,29,.12);
+  --purple: #a371f7;
+  --purple-soft: rgba(163,113,247,.12);
+  --orange: #f0883e;
+  --orange-soft: rgba(240,136,62,.12);
+  --cyan: #39d2c0;
+  --cyan-soft: rgba(57,210,192,.12);
+  --gradient-hero: linear-gradient(135deg, #1a1f2b 0%, #1a2235 50%, #191d2b 100%);
+  --gradient-accent: linear-gradient(135deg, #4c8dff, #6c5ce7);
+  --glass: rgba(20,24,32,.75);
+  --glass-border: rgba(255,255,255,.06);
+}
+
+/* ── Light Theme ── */
+[data-theme="light"] {
+  --bg-root: #f5f6f8;
+  --bg-surface: #fafbfc;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f8f9fb;
+  --bg-input: #f0f1f4;
+  --bg-code: #f5f5f8;
+  --bg-sidebar: #f8f9fb;
+  --border: #e1e4e8;
+  --border-light: #ebeef2;
+  --border-focus: #4c8dff;
+  --text-primary: #1f2328;
+  --text-secondary: #656d76;
+  --text-tertiary: #8c959f;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: rgba(37,99,235,.08);
+  --green: #1a7f37;
+  --green-soft: rgba(26,127,55,.10);
+  --red: #cf222e;
+  --red-soft: rgba(207,34,46,.10);
+  --yellow: #9a6700;
+  --yellow-soft: rgba(154,103,0,.10);
+  --purple: #8250df;
+  --purple-soft: rgba(130,80,223,.10);
+  --orange: #d46a1a;
+  --orange-soft: rgba(212,106,26,.10);
+  --cyan: #1b7c83;
+  --cyan-soft: rgba(27,124,131,.10);
+  --gradient-hero: linear-gradient(135deg, #ffffff 0%, #f0f4ff 50%, #fafbfc 100%);
+  --gradient-accent: linear-gradient(135deg, #2563eb, #6c5ce7);
+  --glass: rgba(255,255,255,.75);
+  --glass-border: rgba(0,0,0,.06);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.04);
+  --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.03);
+  --shadow-md: 0 4px 6px rgba(0,0,0,.05), 0 2px 4px rgba(0,0,0,.03);
+  --shadow-lg: 0 10px 15px rgba(0,0,0,.06), 0 4px 6px rgba(0,0,0,.04);
+}
+
+/* ═══════════════════════════════════════════════
+   Base Reset & Typography
+   ═══════════════════════════════════════════════ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-root);
+  color: var(--text-primary);
+  min-height: 100vh;
+  display: flex;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background var(--transition-slow), color var(--transition-slow);
+}
+
+/* ═══════════════════════════════════════════════
+   Sidebar Navigation
+   ═══════════════════════════════════════════════ */
+.sidebar {
+  width: 246px;
+  flex-shrink: 0;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  z-index: 100;
+  transition: background var(--transition-slow), border var(--transition-slow);
+}
+.sidebar-brand {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-brand .logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+.sidebar-brand .logo i { font-size: 22px; color: var(--accent); }
+.sidebar-brand .ver {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  padding-left: 32px;
+  font-weight: 500;
+}
+.sidebar-nav {
+  flex: 1;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+.sidebar-nav .nav-section {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 12px 12px 6px;
+}
+.sidebar-nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: all var(--transition);
+  position: relative;
+}
+.sidebar-nav a i { width: 18px; text-align: center; font-size: 14px; }
+.sidebar-nav a:hover { background: var(--accent-soft); color: var(--text-primary); }
+.sidebar-nav a.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.sidebar-nav a .badge-nav {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.sidebar-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sidebar-footer .status-indicator {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .6; transform: scale(1.3); }
+}
+.sidebar-footer .status-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* ═══════════════════════════════════════════════
+   Main Content Area
+   ═══════════════════════════════════════════════ */
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Top Bar ── */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 28px;
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--glass-border);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  gap: 16px;
+  transition: background var(--transition-slow);
+}
+.topbar .breadcrumb {
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.topbar .breadcrumb span { color: var(--text-primary); font-weight: 600; }
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-icon {
+  width: 36px; height: 36px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  transition: all var(--transition);
+}
+.btn-icon:hover { background: var(--bg-card-hover); color: var(--text-primary); border-color: var(--border-focus); }
+.btn-icon.active-theme { color: var(--accent); border-color: var(--accent); }
+
+/* ── Content ── */
+.content { padding: 24px 28px 40px; flex: 1; }
+
+/* ── Hero / Page Header ── */
+.page-header { margin-bottom: 24px; }
+.page-header h1 {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+.page-header .desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* ═══════════════════════════════════════════════
+   Cards
+   ═══════════════════════════════════════════════ */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 22px 24px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition);
+}
+.card:hover { box-shadow: var(--shadow); }
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.card-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+}
+.card-header h3 i { color: var(--accent); font-size: 16px; }
+.card-header .card-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+}
+.card-grid { display: grid; gap: 18px; }
+.card-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.card-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.card-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* ═══════════════════════════════════════════════
+   Metrics / Stat Cards
+   ═══════════════════════════════════════════════ */
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition);
+  position: relative;
+  overflow: hidden;
+}
+.stat-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 3px; height: 100%;
+  border-radius: 3px 0 0 3px;
+}
+.stat-card.ok::after { background: var(--green); }
+.stat-card.warn::after { background: var(--yellow); }
+.stat-card.err::after { background: var(--red); }
+.stat-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.stat-card .stat-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+.stat-card .stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+.stat-card .stat-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.stat-card .stat-icon {
+  position: absolute;
+  top: 14px; right: 14px;
+  font-size: 20px;
+  opacity: .15;
+  color: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════
+   Module Status Pills
+   ═══════════════════════════════════════════════ */
+.module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.module-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--bg-input);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-light);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all var(--transition);
+}
+.module-pill .dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.module-pill .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.module-pill .dot.off { background: var(--red); }
+.module-pill .dot.warn { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+
+/* ═══════════════════════════════════════════════
+   Buttons
+   ═══════════════════════════════════════════════ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 18px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+.btn:disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
+.btn i { font-size: 14px; }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); box-shadow: 0 2px 8px rgba(76,141,255,.3); }
+.btn-secondary { background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border); }
+.btn-secondary:hover:not(:disabled) { background: var(--bg-card-hover); border-color: var(--border-focus); }
+.btn-success { background: var(--green); color: #fff; }
+.btn-success:hover:not(:disabled) { filter: brightness(1.1); }
+.btn-danger { background: var(--red); color: #fff; }
+.btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
+.btn-ghost { background: transparent; color: var(--text-secondary); }
+.btn-ghost:hover:not(:disabled) { background: var(--bg-input); color: var(--text-primary); }
+.btn-sm { padding: 5px 12px; font-size: 12px; border-radius: var(--radius-sm); }
+.btn-lg { padding: 12px 26px; font-size: 15px; border-radius: var(--radius); }
+.btn-group { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* ═══════════════════════════════════════════════
+   Form Elements
+   ═══════════════════════════════════════════════ */
+.form-group { margin-bottom: 12px; flex: 1; min-width: 140px; }
+.form-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+  letter-spacing: 0.01em;
+}
+.form-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.form-row > * { flex: 1; min-width: 160px; }
+input, textarea, select {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 13.5px;
+  font-family: inherit;
+  transition: all var(--transition);
+  outline: none;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+textarea { resize: vertical; min-height: 80px; font-family: var(--font-sans); }
+select { cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+input[type="file"] { padding: 8px 10px; cursor: pointer; }
+input[type="file"]::file-selector-button {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-right: 10px;
+  transition: all var(--transition);
+}
+input[type="file"]::file-selector-button:hover { background: var(--bg-card-hover); }
+
+/* ── Drag & Drop Zone ── */
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-lg);
+  padding: 32px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--transition);
+  background: var(--bg-input);
+  position: relative;
+}
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.drop-zone i { font-size: 32px; color: var(--text-tertiary); margin-bottom: 8px; display: block; }
+.drop-zone .dz-text { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
+.drop-zone .dz-hint { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+.drop-zone input[type="file"] { display: none; }
+.drop-zone .file-name {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  display: none;
+}
+
+/* ═══════════════════════════════════════════════
+   Result Display
+   ═══════════════════════════════════════════════ */
+.result-area { margin-top: 14px; }
+.result-box {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  max-height: 360px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+}
+.result-box:empty { display: none; }
+.result-box.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  padding: 24px;
+}
+
+/* ── Audio Player ── */
+.audio-player {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg-input);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  margin-top: 12px;
+}
+.audio-player audio { flex: 1; height: 36px; }
+.audio-player .audio-download {
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all var(--transition);
+}
+.audio-player .audio-download:hover { background: var(--accent-hover); }
+
+/* ── Image Preview ── */
+.img-preview {
+  margin-top: 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  display: inline-block;
+}
+.img-preview img { max-width: 280px; max-height: 200px; display: block; }
+
+/* ═══════════════════════════════════════════════
+   Timing Badge
+   ═══════════════════════════════════════════════ */
+.timing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+.timing.fast { background: var(--green-soft); color: var(--green); }
+.timing.mid { background: var(--yellow-soft); color: var(--yellow); }
+.timing.slow { background: var(--red-soft); color: var(--red); }
+
+/* ═══════════════════════════════════════════════
+   Benchmark Charts
+   ═══════════════════════════════════════════════ */
+.bench-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.bench-summary .bench-stat {
+  text-align: center;
+  padding: 14px 10px;
+  background: var(--bg-input);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-light);
+}
+.bench-stat .bs-value { font-size: 22px; font-weight: 700; font-family: var(--font-mono); }
+.bench-stat .bs-label { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; font-weight: 500; }
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 120px;
+  padding: 0 4px;
+}
+.bar-chart .bar {
+  flex: 1;
+  background: var(--accent);
+  border-radius: 3px 3px 0 0;
+  min-height: 3px;
+  transition: height .4s cubic-bezier(.4,0,.2,1);
+  position: relative;
+  opacity: .75;
+}
+.bar-chart .bar:hover { opacity: 1; }
+.bar-chart .bar .bar-label {
+  position: absolute;
+  bottom: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.bar-chart .bar:first-child { background: linear-gradient(180deg, var(--green), var(--accent)); }
+.bar-chart .bar:last-child { background: linear-gradient(180deg, var(--red), var(--accent)); }
+
+/* ═══════════════════════════════════════════════
+   Toast Notifications
+   ═══════════════════════════════════════════════ */
+.toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  font-weight: 500;
+  pointer-events: auto;
+  animation: toast-in .3s ease-out;
+  max-width: 400px;
+}
+.toast.success { border-left: 3px solid var(--green); }
+.toast.error { border-left: 3px solid var(--red); }
+.toast.info { border-left: 3px solid var(--accent); }
+.toast.warning { border-left: 3px solid var(--yellow); }
+.toast.success i { color: var(--green); }
+.toast.error i { color: var(--red); }
+.toast.info i { color: var(--accent); }
+.toast.warning i { color: var(--yellow); }
+.toast.removing { animation: toast-out .25s ease-in forwards; }
+@keyframes toast-in { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes toast-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(40px); } }
+
+/* ═══════════════════════════════════════════════
+   Tab Content
+   ═══════════════════════════════════════════════ */
+.tab-content { display: none; animation: fadeSlideIn .3s ease; }
+.tab-content.active { display: block; }
+@keyframes fadeSlideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ═══════════════════════════════════════════════
+   Spinner
+   ═══════════════════════════════════════════════ */
+.spinner {
+  display: inline-block;
+  width: 16px; height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+  vertical-align: middle;
+}
+.spinner-lg { width: 24px; height: 24px; border-width: 3px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ═══════════════════════════════════════════════
+   Score Display (Pronunciation)
+   ═══════════════════════════════════════════════ */
+.score-ring {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  border: 4px solid var(--border);
+  font-size: 22px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  position: relative;
+}
+.score-ring.great { border-color: var(--green); color: var(--green); }
+.score-ring.good { border-color: var(--accent); color: var(--accent); }
+.score-ring.ok { border-color: var(--yellow); color: var(--yellow); }
+.score-ring.poor { border-color: var(--red); color: var(--red); }
+
+/* ═══════════════════════════════════════════════
+   Code / JSON display
+   ═══════════════════════════════════════════════ */
+code, .code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: var(--bg-code);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-light);
+}
+
+/* ═══════════════════════════════════════════════
+   Empty State
+   ═══════════════════════════════════════════════ */
+.empty-state {
+  text-align: center;
+  padding: 32px 20px;
+  color: var(--text-tertiary);
+}
+.empty-state i { font-size: 36px; display: block; margin-bottom: 10px; opacity: .4; }
+.empty-state p { font-size: 13px; }
+
+/* ═══════════════════════════════════════════════
+   Responsive
+   ═══════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  body { flex-direction: column; }
+  .sidebar {
+    width: 100%; height: auto; position: relative;
+    border-right: none; border-bottom: 1px solid var(--border);
+    flex-direction: row; flex-wrap: wrap; padding: 10px;
+  }
+  .sidebar-brand { border-bottom: none; padding: 8px 12px; }
+  .sidebar-nav { flex-direction: row; flex-wrap: wrap; gap: 4px; padding: 8px; }
+  .sidebar-nav .nav-section { display: none; }
+  .sidebar-nav a { font-size: 12px; padding: 6px 10px; }
+  .sidebar-footer { display: none; }
+  .topbar { padding: 10px 16px; }
+  .content { padding: 16px; }
+  .card-grid.cols-2, .card-grid.cols-3, .card-grid.cols-4 { grid-template-columns: 1fr; }
+  .stat-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ═══════════════════════════════════════════════
+   Utility
+   ═══════════════════════════════════════════════ */
+.hidden { display: none !important; }
+.mt-8 { margin-top: 8px; }
+.mt-12 { margin-top: 12px; }
+.mt-16 { margin-top: 16px; }
+.mb-8 { margin-bottom: 8px; }
+.text-mono { font-family: var(--font-mono); }
+.text-accent { color: var(--accent); }
+.text-green { color: var(--green); }
+.text-red { color: var(--red); }
+.text-yellow { color: var(--yellow); }
+.text-dim { color: var(--text-secondary); }
+.flex-center { display: flex; align-items: center; gap: 8px; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!--  Sidebar                                        -->
+<!-- ═══════════════════════════════════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo"><i class="fas fa-brain"></i>MemoryTTS</div>
+    <div class="ver">v1.0 · AI Speech Platform</div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-section">监控</div>
+    <a href="#overview" class="active" data-tab="overview"><i class="fas fa-chart-pie"></i>系统概览</a>
+
+    <div class="nav-section">语音引擎</div>
+    <a href="#tts" data-tab="tts"><i class="fas fa-microphone-alt"></i>TTS 合成</a>
+    <a href="#asr" data-tab="asr"><i class="fas fa-headphones"></i>ASR 识别</a>
+
+    <div class="nav-section">学习工具</div>
+    <a href="#pron" data-tab="pron"><i class="fas fa-spell-check"></i>发音评价</a>
+    <a href="#ocr" data-tab="ocr"><i class="fas fa-image"></i>OCR 扫描</a>
+
+    <div class="nav-section">工具</div>
+    <a href="#bench" data-tab="bench"><i class="fas fa-gauge-high"></i>测速工作台</a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="status-indicator" id="sys-dot"></div>
+    <span class="status-text" id="sys-status-text">检测中…</span>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!--  Main Content                                   -->
+<!-- ═══════════════════════════════════════════════ -->
+<div class="main">
+
+<!-- ── Top Bar ── -->
+<header class="topbar">
+  <div class="breadcrumb">
+    <i class="fas fa-home text-dim"></i>
+    <span id="breadcrumb-title">系统概览</span>
+  </div>
+  <div class="topbar-actions">
+    <button class="btn-icon" id="btn-theme" title="切换明暗主题" onclick="toggleTheme()">
+      <i class="fas fa-moon"></i>
+    </button>
+    <button class="btn-icon" title="刷新状态" onclick="loadOverview()">
+      <i class="fas fa-rotate"></i>
+    </button>
+  </div>
+</header>
+
+<!-- ── Content ── -->
+<div class="content">
+
+<!-- ═══════════ Overview ═══════════ -->
+<div id="tab-overview" class="tab-content active">
+  <div class="page-header">
+    <h1><i class="fas fa-chart-pie text-accent"></i> 系统概览</h1>
+    <p class="desc">实时监控各模块运行状态、GPU 资源使用及系统健康信息</p>
+  </div>
+
+  <div class="stat-row" id="sys-metrics"></div>
+
+  <div class="card-grid cols-2">
+    <div class="card">
+      <div class="card-header">
+        <h3><i class="fas fa-cubes"></i>模块状态</h3>
+        <span class="card-badge" style="background:var(--accent-soft);color:var(--accent);">实时</span>
+      </div>
+      <div class="module-grid" id="module-status"></div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <h3><i class="fas fa-sliders-h"></i>OCR 配置</h3>
+      </div>
+      <div id="ocr-config" class="result-box"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ TTS ═══════════ -->
+<div id="tab-tts" class="tab-content">
+  <div class="page-header">
+    <h1><i class="fas fa-microphone-alt text-accent"></i> TTS 语音合成</h1>
+    <p class="desc">输入文本，选择音色和语言，生成自然流畅的语音</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3><i class="fas fa-pen-to-square"></i>文本输入</h3></div>
+    <div class="form-group">
+      <label class="form-label">合成文本</label>
+      <textarea id="tts-text" placeholder="输入要合成的文本内容…" rows="3">Hello, welcome to Memory English Learning App! How can I help you today?</textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">音色</label>
+        <select id="tts-voice">
+          <option value="Ono_Anna">Ono_Anna — English (充满活力的男声)</option>
+          <option value="aiden">Aiden — English (阳光美式男声)</option>
+          <option value="vivian">Vivian — 中文 (明亮女声)</option>
+          <option value="serena">Serena — 中文 (温柔女声)</option>
+          <option value="uncle_fu">Uncle_Fu — 中文 (成熟男声)</option>
+          <option value="dylan">Dylan — 京腔 (北京男声)</option>
+          <option value="eric">Eric — 川话 (成都男声)</option>
+          <option value="ono_anna">Ono_Anna — 日本語 (活泼女声)</option>
+          <option value="sohee">Sohee — 한국어 (温暖女声)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">语言</label>
+        <select id="tts-lang">
+          <option value="English">English</option>
+          <option value="Chinese">中文</option>
+          <option value="Japanese">日本語</option>
+          <option value="Korean">한국어</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">语音指令 <span class="text-dim">(可选)</span></label>
+        <input id="tts-inst" placeholder="如: Speak cheerfully..." value="Speak with a happy and encouraging tone.">
+      </div>
+    </div>
+    <div class="btn-group mt-12">
+      <button class="btn btn-primary btn-lg" onclick="ttsGenerate()"><i class="fas fa-play"></i>合成语音</button>
+      <span id="tts-time" class="timing hidden"></span>
+    </div>
+    <div id="tts-result" class="mt-12"></div>
+  </div>
+</div>
+
+<!-- ═══════════ ASR ═══════════ -->
+<div id="tab-asr" class="tab-content">
+  <div class="page-header">
+    <h1><i class="fas fa-headphones text-accent"></i> ASR 语音识别</h1>
+    <p class="desc">上传音频文件，自动识别语音内容并输出文本</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3><i class="fas fa-upload"></i>上传音频</h3></div>
+    <div class="drop-zone" id="asr-dropzone" onclick="document.getElementById('asr-file').click()">
+      <i class="fas fa-cloud-upload-alt"></i>
+      <div class="dz-text">点击或拖拽音频文件到此处</div>
+      <div class="dz-hint">支持 WAV · MP3 · FLAC · M4A</div>
+      <div class="file-name" id="asr-filename"></div>
+      <input type="file" id="asr-file" accept="audio/*" onchange="onFileSelected(this, 'asr-filename')">
+    </div>
+    <div class="form-row mt-12">
+      <div class="form-group">
+        <label class="form-label">语言</label>
+        <select id="asr-lang">
+          <option value="">自动检测</option>
+          <option value="en">English</option>
+          <option value="zh">中文</option>
+          <option value="ja">日本語</option>
+          <option value="ko">한국어</option>
+        </select>
+      </div>
+    </div>
+    <div class="btn-group mt-8">
+      <button class="btn btn-primary" onclick="asrTranscribe()"><i class="fas fa-language"></i>开始转录</button>
+      <span id="asr-time" class="timing hidden"></span>
+    </div>
+    <div id="asr-result" class="result-area"></div>
+  </div>
+</div>
+
+<!-- ═══════════ Pronunciation ═══════════ -->
+<div id="tab-pron" class="tab-content">
+  <div class="page-header">
+    <h1><i class="fas fa-spell-check text-accent"></i> 发音评价</h1>
+    <p class="desc">上传学生录音与参考文本，基于音素对齐技术评估发音准确度</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3><i class="fas fa-microphone"></i>音素评价（推荐）</h3></div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">学生录音</label>
+        <input type="file" id="pron-audio" accept="audio/*" onchange="onFileSelected(this, 'pron-filename')">
+        <div class="file-name mt-8" id="pron-filename" style="display:block;"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">参考文本</label>
+        <input id="pron-text" value="Hello, welcome to Memory English Learning App!">
+      </div>
+      <div class="form-group">
+        <label class="form-label">语言</label>
+        <select id="pron-lang"><option value="en">English</option><option value="zh">中文</option></select>
+      </div>
+    </div>
+    <div class="btn-group mt-8">
+      <button class="btn btn-primary" onclick="pronScore()"><i class="fas fa-star"></i>开始评分</button>
+      <span id="pron-time" class="timing hidden"></span>
+    </div>
+    <div id="pron-result" class="mt-12"></div>
+  </div>
+</div>
+
+<!-- ═══════════ OCR ═══════════ -->
+<div id="tab-ocr" class="tab-content">
+  <div class="page-header">
+    <h1><i class="fas fa-image text-accent"></i> OCR 文字识别</h1>
+    <p class="desc">上传图片（作文/文档/笔记），智能提取文字内容</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3><i class="fas fa-upload"></i>上传图片</h3></div>
+    <div class="drop-zone" id="ocr-dropzone" onclick="document.getElementById('ocr-file').click()">
+      <i class="fas fa-cloud-upload-alt"></i>
+      <div class="dz-text">点击或拖拽图片文件到此处</div>
+      <div class="dz-hint">支持 PNG · JPG · BMP · WEBP</div>
+      <div class="file-name" id="ocr-filename"></div>
+      <input type="file" id="ocr-file" accept="image/*" onchange="onFileSelected(this, 'ocr-filename'); previewImage(this);">
+    </div>
+    <div class="form-row mt-12">
+      <div class="form-group">
+        <label class="form-label">识别语言</label>
+        <select id="ocr-lang">
+          <option value="en">English</option>
+          <option value="ch">中文</option>
+          <option value="Multilingual">多语言混合</option>
+        </select>
+      </div>
+    </div>
+    <div class="btn-group mt-8">
+      <button class="btn btn-primary" onclick="ocrScan()"><i class="fas fa-search"></i>开始扫描</button>
+      <span id="ocr-time" class="timing hidden"></span>
+    </div>
+    <div id="ocr-preview" class="mt-12"></div>
+    <div class="result-area"><div id="ocr-result" class="result-box"></div></div>
+  </div>
+</div>
+
+<!-- ═══════════ Benchmark ═══════════ -->
+<div id="tab-bench" class="tab-content">
+  <div class="page-header">
+    <h1><i class="fas fa-gauge-high text-accent"></i> 测速工作台</h1>
+    <p class="desc">多次运行取平均，测量各模块的实际响应延迟</p>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3><i class="fas fa-sliders"></i>测试参数</h3></div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">测试模块</label>
+        <select id="bench-module">
+          <option value="tts">TTS 合成</option>
+          <option value="asr">ASR 识别</option>
+          <option value="ocr">OCR 扫描</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">迭代次数</label>
+        <input type="number" id="bench-iters" value="5" min="2" max="30">
+      </div>
+    </div>
+    <div class="btn-group mt-12">
+      <button class="btn btn-success btn-lg" onclick="runBenchmark()"><i class="fas fa-bolt"></i>开始测速</button>
+    </div>
+    <div id="bench-result" class="mt-16"></div>
+  </div>
+</div>
+
+</div><!-- .content -->
+</div><!-- .main -->
+
+<!-- ═══════════════════════════════════════════════ -->
+<!--  Toast Container                                -->
+<!-- ═══════════════════════════════════════════════ -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!--  JavaScript — Application Logic                 -->
+<!-- ═══════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════
+//  Theme Management
+// ═══════════════════════════════════════════════
+function getSystemTheme() {
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('btn-theme');
+  const icon = btn.querySelector('i');
+  if (theme === 'light') {
+    icon.className = 'fas fa-sun';
+    btn.classList.add('active-theme');
+  } else {
+    icon.className = 'fas fa-moon';
+    btn.classList.remove('active-theme');
+  }
+  localStorage.setItem('memorytts-theme', theme);
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme');
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+}
+
+// Init theme from localStorage or system preference
+const savedTheme = localStorage.getItem('memorytts-theme');
+applyTheme(savedTheme || getSystemTheme());
+
+// Listen for system theme changes
+window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
+  if (!localStorage.getItem('memorytts-theme')) {
+    applyTheme(e.matches ? 'light' : 'dark');
+  }
+});
+
+// ═══════════════════════════════════════════════
+//  Toast Notification System
+// ═══════════════════════════════════════════════
+function toast(message, type, duration) {
+  type = type || 'info';
+  duration = duration || 3500;
+  var container = document.getElementById('toast-container');
+  var icons = { success: 'fa-circle-check', error: 'fa-circle-xmark', info: 'fa-circle-info', warning: 'fa-triangle-exclamation' };
+  var el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.innerHTML = '<i class="fas ' + (icons[type] || icons.info) + '"></i>' + message;
+  container.appendChild(el);
+
+  setTimeout(function() {
+    el.classList.add('removing');
+    setTimeout(function() { el.remove(); }, 260);
+  }, duration);
+}
+
+// ═══════════════════════════════════════════════
+//  Tab Navigation
+// ═══════════════════════════════════════════════
+var tabTitles = {
+  overview: '系统概览',
+  tts: 'TTS 合成',
+  asr: 'ASR 识别',
+  pron: '发音评价',
+  ocr: 'OCR 扫描',
+  bench: '测速工作台'
+};
+
+document.querySelectorAll('.sidebar-nav a').forEach(function(a) {
+  a.addEventListener('click', function(e) {
+    e.preventDefault();
+    var tab = a.dataset.tab;
+    // Update sidebar
+    document.querySelectorAll('.sidebar-nav a').forEach(function(x) { x.classList.remove('active'); });
+    a.classList.add('active');
+    // Update content
+    document.querySelectorAll('.tab-content').forEach(function(x) { x.classList.remove('active'); });
+    document.getElementById('tab-' + tab).classList.add('active');
+    // Update breadcrumb
+    document.getElementById('breadcrumb-title').textContent = tabTitles[tab] || tab;
+    // Auto-load overview
+    if (tab === 'overview') loadOverview();
+    // Scroll to top
+    document.querySelector('.content').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+
+// ═══════════════════════════════════════════════
+//  API Helpers
+// ═══════════════════════════════════════════════
+var API = {
+  get: function(path) {
+    return fetch('/api/v1' + path).then(function(r) {
+      if (!r.ok) { return r.text().then(function(t) { throw new Error(t); }); }
+      return r.json();
+    });
+  },
+  post: function(path, body) {
+    var isForm = body instanceof FormData;
+    return fetch('/api/v1' + path, {
+      method: 'POST',
+      headers: isForm ? {} : { 'Content-Type': 'application/json' },
+      body: isForm ? body : JSON.stringify(body)
+    }).then(function(r) {
+      if (!r.ok) { return r.text().then(function(t) { throw new Error(t); }); }
+      var ct = r.headers.get('content-type') || '';
+      if (ct.indexOf('audio/') !== -1) return r.blob();
+      return r.json();
+    });
+  }
+};
+
+function timingFn(fn) {
+  return function() {
+    var args = arguments;
+    var t0 = performance.now();
+    return fn.apply(null, args).then(function(result) {
+      return { result: result, ms: Math.round(performance.now() - t0) };
+    });
+  };
+}
+
+function showTiming(elId, ms) {
+  var el = document.getElementById(elId);
+  if (!el) return;
+  el.classList.remove('hidden');
+  el.textContent = ms + ' ms';
+  el.className = 'timing ' + (ms < 500 ? 'fast' : ms < 2000 ? 'mid' : 'slow');
+}
+
+function showResult(containerId, html) {
+  var el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════
+//  File Helpers
+// ═══════════════════════════════════════════════
+function onFileSelected(input, displayId) {
+  var display = document.getElementById(displayId);
+  if (input.files && input.files[0]) {
+    display.textContent = '📎 ' + input.files[0].name;
+    display.style.display = 'block';
+  }
+}
+
+function previewImage(input) {
+  var container = document.getElementById('ocr-preview');
+  if (input.files && input.files[0]) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      container.innerHTML = '<div class="img-preview"><img src="' + e.target.result + '" alt="Preview"></div>';
+    };
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+
+// Setup drag & drop
+function setupDropZone(zoneId, inputId, displayId) {
+  var zone = document.getElementById(zoneId);
+  var input = document.getElementById(inputId);
+
+  zone.addEventListener('dragover', function(e) { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', function() { zone.classList.remove('drag-over'); });
+  zone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    var files = e.dataTransfer.files;
+    if (files.length > 0) {
+      var dt = new DataTransfer();
+      dt.items.add(files[0]);
+      input.files = dt.files;
+      onFileSelected(input, displayId);
+      if (inputId === 'ocr-file') previewImage(input);
+    }
+  });
+}
+
+setupDropZone('asr-dropzone', 'asr-file', 'asr-filename');
+setupDropZone('ocr-dropzone', 'ocr-file', 'ocr-filename');
+
+// ═══════════════════════════════════════════════
+//  Overview — System Health
+// ═══════════════════════════════════════════════
+function loadOverview() {
+  API.get('/health').then(function(h) {
+    return API.get('/ocr/health').then(function(o) {
+      // Update sidebar status
+      var dot = document.getElementById('sys-dot');
+      var txt = document.getElementById('sys-status-text');
+      if (h.status === 'healthy') {
+        dot.className = 'status-indicator';
+        txt.textContent = '系统正常';
+      } else {
+        dot.className = 'status-indicator';
+        dot.style.background = 'var(--red)';
+        txt.textContent = '异常';
+      }
+
+      // Stats row
+      var metrics = document.getElementById('sys-metrics');
+      var gpuOk = h.gpu_available;
+      var vramUsed = (h.vram_used_mb || 0).toFixed(0);
+      var vramTotal = (h.vram_total_mb || 0).toFixed(0);
+      var vramPct = vramTotal > 0 ? ((h.vram_used_mb / h.vram_total_mb) * 100).toFixed(0) : 0;
+
+      metrics.innerHTML =
+        '<div class="stat-card ' + (h.status === 'healthy' ? 'ok' : 'err') + '">' +
+          '<div class="stat-icon"><i class="fas fa-heartbeat"></i></div>' +
+          '<div class="stat-label">系统状态</div>' +
+          '<div class="stat-value" style="font-size:20px;">' + (h.status === 'healthy' ? '🟢 健康' : '🔴 异常') + '</div>' +
+          '<div class="stat-sub">所有服务正常运行</div>' +
+        '</div>' +
+        '<div class="stat-card ' + (gpuOk ? 'ok' : 'warn') + '">' +
+          '<div class="stat-icon"><i class="fas fa-microchip"></i></div>' +
+          '<div class="stat-label">GPU 状态</div>' +
+          '<div class="stat-value">' + (gpuOk ? '✓ 可用' : '✗ 不可用') + '</div>' +
+          '<div class="stat-sub">' + (gpuOk ? 'CUDA 加速已启用' : '使用 CPU 推理') + '</div>' +
+        '</div>' +
+        '<div class="stat-card ok">' +
+          '<div class="stat-icon"><i class="fas fa-memory"></i></div>' +
+          '<div class="stat-label">显存使用</div>' +
+          '<div class="stat-value">' + vramUsed + '<span style="font-size:14px;font-weight:400;color:var(--text-secondary);"> / ' + vramTotal + ' MB</span></div>' +
+          '<div class="stat-sub">使用率 ' + vramPct + '%</div>' +
+        '</div>' +
+        '<div class="stat-card ' + (h.model_loaded ? 'ok' : 'err') + '">' +
+          '<div class="stat-icon"><i class="fas fa-boxes-stacked"></i></div>' +
+          '<div class="stat-label">TTS 模型</div>' +
+          '<div class="stat-value">' + (h.model_loaded ? '✓ 已加载' : '✗ 未加载') + '</div>' +
+          '<div class="stat-sub">' + (h.model_loaded ? 'Qwen-TTS 就绪' : '模型加载失败') + '</div>' +
+        '</div>';
+
+      // Module status
+      var ms = document.getElementById('module-status');
+      ms.innerHTML =
+        '<div class="module-pill"><span class="dot ' + (h.model_loaded ? 'on' : 'off') + '"></span><strong>TTS</strong> — ' + (h.model_loaded ? 'Qwen-TTS 就绪' : '未加载') + '</div>' +
+        '<div class="module-pill"><span class="dot on"></span><strong>ASR</strong> — Faster-Whisper 就绪</div>' +
+        '<div class="module-pill"><span class="dot on"></span><strong>发音评价</strong> — 音素对齐 + MFCC/DTW</div>' +
+        '<div class="module-pill"><span class="dot ' + (o.ocr_available ? 'on' : 'warn') + '"></span><strong>OCR</strong> — ' + (o.ocr_available ? (o.device_actual || '已加载') : '未加载') + '</div>';
+
+      // OCR Config
+      var oc = document.getElementById('ocr-config');
+      if (o.config) {
+        oc.textContent = JSON.stringify(o.config, null, 2);
+      }
+    });
+  }).catch(function(e) {
+    console.error('Overview load failed:', e);
+    document.getElementById('sys-status-text').textContent = '连接失败';
+  });
+}
+
+// Auto-refresh overview every 15s when on that tab
+var overviewInterval = null;
+function startOverviewPolling() {
+  if (overviewInterval) clearInterval(overviewInterval);
+  overviewInterval = setInterval(function() {
+    var tab = document.getElementById('tab-overview');
+    if (tab && tab.classList.contains('active')) loadOverview();
+  }, 15000);
+}
+
+loadOverview();
+startOverviewPolling();
+
+// ═══════════════════════════════════════════════
+//  TTS — Text to Speech
+// ═══════════════════════════════════════════════
+function ttsGenerate() {
+  var btn = document.querySelector('#tab-tts .btn-primary');
+  var origHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>合成中…';
+  showResult('tts-result', '');
+  document.getElementById('tts-time').classList.add('hidden');
+
+  var payload = {
+    text: document.getElementById('tts-text').value.trim(),
+    voice: document.getElementById('tts-voice').value,
+    language: document.getElementById('tts-lang').value,
+    instructions: document.getElementById('tts-inst').value.trim() || null
+  };
+
+  var t0 = performance.now();
+  fetch('/api/v1/tts/synthesize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(function(r) {
+    if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
+    return r.blob();
+  }).then(function(blob) {
+    var ms = Math.round(performance.now() - t0);
+    var url = URL.createObjectURL(blob);
+    showResult('tts-result',
+      '<div class="audio-player">' +
+        '<i class="fas fa-volume-up text-accent"></i>' +
+        '<audio controls src="' + url + '"></audio>' +
+        '<a class="audio-download" href="' + url + '" download="tts_output.wav"><i class="fas fa-download"></i> 下载</a>' +
+      '</div>'
+    );
+    showTiming('tts-time', ms);
+    toast('语音合成成功', 'success');
+  }).catch(function(e) {
+    showResult('tts-result', '<div class="result-box" style="color:var(--red);">❌ ' + e.message + '</div>');
+    toast('合成失败: ' + e.message, 'error');
+  }).finally(function() {
+    btn.disabled = false;
+    btn.innerHTML = origHTML;
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  ASR — Speech Recognition
+// ═══════════════════════════════════════════════
+function asrTranscribe() {
+  var fileInput = document.getElementById('asr-file');
+  var file = fileInput.files[0];
+  if (!file) { toast('请先选择音频文件', 'warning'); return; }
+
+  var btn = document.querySelector('#tab-asr .btn-primary');
+  var origHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>识别中…';
+  showResult('asr-result', '<div class="result-box loading"><span class="spinner"></span>正在转录音频…</div>');
+  document.getElementById('asr-time').classList.add('hidden');
+
+  var fd = new FormData();
+  fd.append('audio', file);
+  var lang = document.getElementById('asr-lang').value;
+  if (lang) fd.append('language', lang);
+
+  var t0 = performance.now();
+  fetch('/api/v1/asr/transcribe', { method: 'POST', body: fd }).then(function(r) {
+    if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
+    return r.json();
+  }).then(function(result) {
+    var ms = Math.round(performance.now() - t0);
+    var langProb = ((result.language_probability || 0) * 100).toFixed(1);
+    showResult('asr-result',
+      '<div class="result-box">' +
+        '<span style="color:var(--text-tertiary);">┌─ 识别结果 ─────────────────────────────</span>\n' +
+        '  语言: <strong>' + (result.language || '未知') + '</strong> <span class="text-dim">(置信度 ' + langProb + '%)</span>\n' +
+        '<span style="color:var(--text-tertiary);">└──────────────────────────────────────────</span>\n\n' +
+        (result.text || '(未检测到语音内容)') +
+      '</div>'
+    );
+    showTiming('asr-time', ms);
+    toast('转录完成 — 语言: ' + (result.language || '?'), 'success');
+  }).catch(function(e) {
+    showResult('asr-result', '<div class="result-box" style="color:var(--red);">❌ ' + e.message + '</div>');
+    toast('转录失败: ' + e.message, 'error');
+  }).finally(function() {
+    btn.disabled = false;
+    btn.innerHTML = origHTML;
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  Pronunciation — Phoneme Scoring
+// ═══════════════════════════════════════════════
+function pronScore() {
+  var fileInput = document.getElementById('pron-audio');
+  var file = fileInput.files[0];
+  if (!file) { toast('请先选择学生录音', 'warning'); return; }
+
+  var btn = document.querySelector('#tab-pron .btn-primary');
+  var origHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>评分中…';
+  showResult('pron-result', '');
+  document.getElementById('pron-time').classList.add('hidden');
+
+  var fd = new FormData();
+  fd.append('student_audio', file);
+  fd.append('reference_text', document.getElementById('pron-text').value.trim());
+  fd.append('language', document.getElementById('pron-lang').value);
+
+  var t0 = performance.now();
+  fetch('/api/v1/pronunciation/phoneme-score', { method: 'POST', body: fd }).then(function(r) {
+    if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
+    return r.json();
+  }).then(function(result) {
+    var ms = Math.round(performance.now() - t0);
+    var overallScore = result.overallScore || result.overall_score || 0;
+    var accuracy = result.accuracyScore || result.accuracy_score || 0;
+    var fluency = result.fluencyScore || result.fluency_score || 0;
+    var completeness = result.completenessScore || result.completeness_score || 0;
+    var pron = result.pronunciationScore || result.pronunciation_score || 0;
+
+    var scoreClass = overallScore >= 85 ? 'great' : overallScore >= 70 ? 'good' : overallScore >= 50 ? 'ok' : 'poor';
+
+    var html = '<div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;">';
+    html += '<div class="score-ring ' + scoreClass + '">' + (typeof overallScore === 'number' ? overallScore.toFixed(0) : '?') + '</div>';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;font-size:13px;">';
+    html += '<div><span class="text-dim">准确度</span> <strong>' + (typeof accuracy === 'number' ? accuracy.toFixed(1) : '?') + '%</strong></div>';
+    html += '<div><span class="text-dim">流利度</span> <strong>' + (typeof fluency === 'number' ? fluency.toFixed(1) : '?') + '%</strong></div>';
+    html += '<div><span class="text-dim">完整度</span> <strong>' + (typeof completeness === 'number' ? completeness.toFixed(1) : '?') + '%</strong></div>';
+    html += '<div><span class="text-dim">发音分</span> <strong>' + (typeof pron === 'number' ? pron.toFixed(1) : '?') + '%</strong></div>';
+    html += '</div></div>';
+
+    if (result.details || result.wordResults || result.word_results) {
+      html += '<div class="result-box mt-12">' + JSON.stringify(result, null, 2) + '</div>';
+    }
+
+    showResult('pron-result', html);
+    showTiming('pron-time', ms);
+    var scoreText = typeof overallScore === 'number' ? overallScore.toFixed(0) : '?';
+    toast('发音评分完成 — 综合得分: ' + scoreText, 'success');
+  }).catch(function(e) {
+    showResult('pron-result', '<div class="result-box" style="color:var(--red);">❌ ' + e.message + '</div>');
+    toast('评分失败: ' + e.message, 'error');
+  }).finally(function() {
+    btn.disabled = false;
+    btn.innerHTML = origHTML;
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  OCR — Image to Text
+// ═══════════════════════════════════════════════
+function ocrScan() {
+  var fileInput = document.getElementById('ocr-file');
+  var file = fileInput.files[0];
+  if (!file) { toast('请先选择图片文件', 'warning'); return; }
+
+  var btn = document.querySelector('#tab-ocr .btn-primary');
+  var origHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>扫描中…';
+  document.getElementById('ocr-result').textContent = '';
+  document.getElementById('ocr-time').classList.add('hidden');
+
+  var fd = new FormData();
+  fd.append('image', file);
+  fd.append('language', document.getElementById('ocr-lang').value);
+
+  var t0 = performance.now();
+  fetch('/api/v1/ocr/scan', { method: 'POST', body: fd }).then(function(r) {
+    if (!r.ok) return r.text().then(function(t) { throw new Error(t); });
+    return r.json();
+  }).then(function(result) {
+    var ms = Math.round(performance.now() - t0);
+    var conf = ((result.avg_confidence || 0) * 100).toFixed(1);
+    var lines = (result.lines || []).length;
+    var model = result.model_tier || '?';
+    var confClass = conf >= 90 ? 'text-green' : conf >= 70 ? 'text-yellow' : 'text-red';
+
+    var resultBox = document.getElementById('ocr-result');
+    resultBox.innerHTML =
+      '<span style="color:var(--text-tertiary);">┌─ 扫描结果 ──────────────────────────────────────────</span>\n' +
+      '  置信度: <strong class="' + confClass + '">' + conf + '%</strong>  |  行数: <strong>' + lines + '</strong>  |  模型: <strong>' + model + '</strong>\n' +
+      '<span style="color:var(--text-tertiary);">└──────────────────────────────────────────────────────</span>\n\n' +
+      (result.text || '(未识别到文字)');
+    showTiming('ocr-time', ms);
+    toast('OCR 完成 — 置信度 ' + conf + '%，识别 ' + lines + ' 行', 'success');
+  }).catch(function(e) {
+    document.getElementById('ocr-result').innerHTML = '<span style="color:var(--red);">❌ ' + e.message + '</span>';
+    toast('OCR 失败: ' + e.message, 'error');
+  }).finally(function() {
+    btn.disabled = false;
+    btn.innerHTML = origHTML;
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  Benchmark
+// ═══════════════════════════════════════════════
+function runBenchmark() {
+  var mod = document.getElementById('bench-module').value;
+  var iters = Math.min(Math.max(parseInt(document.getElementById('bench-iters').value) || 5, 2), 30);
+  var res = document.getElementById('bench-result');
+  res.innerHTML = '<div class="card" style="text-align:center;padding:32px;"><span class="spinner spinner-lg"></span><p class="mt-8 text-dim">测速中…</p></div>';
+
+  var times = [];
+  var modLabel = mod === 'tts' ? 'TTS 合成' : mod === 'asr' ? 'ASR 识别' : 'OCR 扫描';
+
+  function runIteration(i) {
+    if (i >= iters) {
+      // All done, show results
+      var avg = times.reduce(function(a, b) { return a + b; }, 0) / times.length;
+      var min = Math.min.apply(null, times);
+      var max = Math.max.apply(null, times);
+      var sorted = times.slice().sort(function(a, b) { return a - b; });
+      var median = sorted[Math.floor(sorted.length / 2)];
+      var variance = times.reduce(function(sum, t) { return sum + (t - avg) * (t - avg); }, 0) / times.length;
+      var stddev = Math.sqrt(variance);
+      var maxBar = Math.max.apply(null, times.concat([1]));
+
+      var bars = '';
+      for (var j = 0; j < times.length; j++) {
+        var h = Math.max((times[j] / maxBar) * 100, 4);
+        var color = times[j] === min ? 'var(--green)' : times[j] === max ? 'var(--red)' : 'var(--accent)';
+        bars += '<div class="bar" style="height:' + h + 'px;background:' + color + ';" title="#' + (j+1) + ': ' + times[j] + ' ms"><span class="bar-label">' + times[j] + '</span></div>';
+      }
+
+      res.innerHTML =
+        '<div class="card">' +
+          '<div class="card-header"><h3><i class="fas fa-chart-bar"></i>' + modLabel + ' — 测速报告</h3></div>' +
+          '<div class="bench-summary">' +
+            '<div class="bench-stat"><div class="bs-value text-accent">' + avg.toFixed(0) + '</div><div class="bs-label">平均 (ms)</div></div>' +
+            '<div class="bench-stat"><div class="bs-value text-green">' + min + '</div><div class="bs-label">最快 (ms)</div></div>' +
+            '<div class="bench-stat"><div class="bs-value text-red">' + max + '</div><div class="bs-label">最慢 (ms)</div></div>' +
+            '<div class="bench-stat"><div class="bs-value">' + median + '</div><div class="bs-label">中位数 (ms)</div></div>' +
+            '<div class="bench-stat"><div class="bs-value">' + stddev.toFixed(0) + '</div><div class="bs-label">标准差 (ms)</div></div>' +
+            '<div class="bench-stat"><div class="bs-value">' + iters + '</div><div class="bs-label">迭代次数</div></div>' +
+          '</div>' +
+          '<div class="bar-chart">' + bars + '</div>' +
+          '<p class="text-dim mt-12" style="font-size:11px;text-align:center;">每根柱子代表一次迭代 (ms) · 绿色=最快 · 红色=最慢</p>' +
+        '</div>';
+      toast(modLabel + ' 测速完成 — 平均 ' + avg.toFixed(0) + ' ms', 'info');
+      return;
+    }
+
+    res.innerHTML = '<div class="card" style="text-align:center;padding:32px;"><span class="spinner spinner-lg"></span><p class="mt-8 text-dim">测速中… (' + (i + 1) + ' / ' + iters + ')</p></div>';
+
+    var t0 = performance.now();
+    var p;
+    if (mod === 'tts') {
+      p = fetch('/api/v1/tts/synthesize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello. This is a speed benchmark test.', voice: 'Ono_Anna', language: 'English' })
+      }).then(function(r) { if (!r.ok) throw new Error('fail'); return r.blob(); });
+    } else if (mod === 'asr') {
+      p = API.get('/health');
+    } else {
+      p = API.get('/ocr/health');
+    }
+
+    p.then(function() {
+      times.push(Math.round(performance.now() - t0));
+    }).catch(function() {
+      times.push(Math.round(performance.now() - t0));
+    }).finally(function() {
+      setTimeout(function() { runIteration(i + 1); }, 300);
+    });
+  }
+
+  runIteration(0);
+}
+
+// ═══════════════════════════════════════════════
+//  Keyboard Shortcuts
+// ═══════════════════════════════════════════════
+document.addEventListener('keydown', function(e) {
+  if (e.ctrlKey || e.metaKey) {
+    switch (e.key.toLowerCase()) {
+      case '1': document.querySelector('[data-tab="overview"]').click(); break;
+      case '2': document.querySelector('[data-tab="tts"]').click(); break;
+      case '3': document.querySelector('[data-tab="asr"]').click(); break;
+      case '4': document.querySelector('[data-tab="pron"]').click(); break;
+      case '5': document.querySelector('[data-tab="ocr"]').click(); break;
+      case '6': document.querySelector('[data-tab="bench"]').click(); break;
+      case 'b': if (document.getElementById('tab-bench').classList.contains('active')) runBenchmark(); break;
+      case 'enter':
+        e.preventDefault();
+        var activeTab = document.querySelector('.tab-content.active');
+        if (activeTab) {
+          var btn = activeTab.querySelector('.btn-primary, .btn-success');
+          if (btn && !btn.disabled) btn.click();
+        }
+        break;
+    }
+  }
+});
+</script>
+</body>
+</html>

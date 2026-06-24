@@ -8,9 +8,12 @@ __pycache__/
 .venv/
 venv*/
 .env
+tests/
 
 # VSCode
 .vscode/
+.vscode-test/
+.github/
 
 # Jupyter/Notebook
 .ipynb_checkpoints/

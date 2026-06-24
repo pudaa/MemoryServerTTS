@@ -1,12 +1,11 @@
 """
 G2P (Grapheme-to-Phoneme) 引擎抽象层
-
-支持英文 (g2p-en) 和中文 (pypinyin) 的音素转换，
-可扩展其他语言的 G2P 后端。
 """
-
 import re
 from abc import ABC, abstractmethod
+from src.common.logging import get_logger
+
+_logger = get_logger("G2P")
 
 
 class G2PEngine(ABC):
@@ -143,5 +142,5 @@ def get_g2p_engine(language: str) -> G2PEngine:
         return ChineseG2P()
     else:
         # 默认回退到英文
-        print(f"[G2P] 未识别的语言代码 '{language}'，默认使用英文 G2P")
+        _logger.warning(f"未识别的语言代码 '{language}'，默认使用英文 G2P")
         return EnglishG2P()

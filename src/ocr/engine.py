@@ -1,30 +1,15 @@
 """
 OCR 引擎模块 —— 基于 PaddleOCR (PP-OCRv6) 的图片/文档文字提取
 统一由 OCRConfig 管理配置 (模型档位、预处理、检测参数等)。
-
-配置方式:
-  from src.ocr_config import OCRConfig
-  from src.ocr_engine import OCREngine
-
-  cfg = OCRConfig()                 # 加载 config/ocr_config.yaml
-  cfg.model_tier = "small"          # 切换模型档位
-  engine = OCREngine(cfg)           # 用配置初始化引擎
-
-GPU 加速说明:
-- ✅ onnxruntime-gpu 1.21.0 + CUDA 12.x (Driver 610.47) 已启用
-- ⚠️ 不要升级到 onnxruntime-gpu ≥1.27.0 (需要 CUDA 13.x)
 """
-import os
-import time
-import logging
+import os, time
 from pathlib import Path
 from typing import Optional
+from src.common.logging import get_logger
+from src.ocr.config import OCRConfig
 
-logger = logging.getLogger(__name__)
-
-# 支持的图片格式
+_logger = get_logger("OCR")
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
-# 支持的文档格式
 SUPPORTED_DOC_EXTENSIONS = {".pdf"}
 
 
@@ -36,7 +21,7 @@ class OCREngine:
         Args:
             config: OCRConfig 实例。为 None 时自动加载默认配置文件。
         """
-        from src.ocr_config import OCRConfig
+        from src.ocr.config import OCRConfig
 
         self._config = config if config is not None else OCRConfig()
         self._ocr = None
@@ -67,9 +52,18 @@ class OCREngine:
         if self._ready:
             return
 
+        # 抑制 ONNX Runtime 图优化警告
+        import warnings
+        warnings.filterwarnings("ignore", category=UserWarning, module="paddleocr")
+        try:
+            from onnxruntime import set_default_logger_severity
+            set_default_logger_severity(3)  # 3=ERROR, 仅显示错误
+        except Exception:
+            pass
+
         self._init_kwargs = self._config.to_paddleocr_kwargs()
 
-        logger.info(
+        _logger.info(
             f"加载 PaddleOCR: engine={self._config.engine}, "
             f"tier={self._config.model_tier} "
             f"({self._config.detection_model_name} / {self._config.recognition_model_name}), "
@@ -83,7 +77,7 @@ class OCREngine:
                 self._ocr = PaddleOCR(**self._init_kwargs)
                 self._actual_device = self._config.device
                 self._ready = True
-                logger.info(
+                _logger.info(
                     f"PaddleOCR 就绪: device={self._actual_device}, "
                     f"tier={self._config.model_tier}, "
                     f"{self._config.preprocess_desc}"
@@ -93,20 +87,20 @@ class OCREngine:
                 if self._config.device == "gpu" and any(
                     kw in error_msg for kw in ("GPU", "CUDA", "provider")
                 ):
-                    logger.warning(f"GPU 不可用，降级到 CPU: {error_msg[:150]}")
+                    _logger.warning(f"GPU 不可用，降级到 CPU: {error_msg[:150]}")
                     cpu_kwargs = {**self._init_kwargs, "device": "cpu"}
                     self._ocr = PaddleOCR(**cpu_kwargs)
                     self._actual_device = "cpu"
                     self._ready = True
-                    logger.info("PaddleOCR 就绪: device=cpu (降级模式)")
+                    _logger.info("PaddleOCR 就绪: device=cpu (降级模式)")
                     return
                 else:
                     raise
         except ImportError as e:
-            logger.error(f"PaddleOCR 未安装: {e}")
+            _logger.error(f"PaddleOCR 未安装: {e}")
             raise
         except Exception as e:
-            logger.error(f"PaddleOCR 加载失败: {e}")
+            _logger.error(f"PaddleOCR 加载失败: {e}")
             raise
 
     def reload(self):
@@ -194,7 +188,7 @@ class OCREngine:
 
         except Exception as e:
             elapsed_ms = (time.perf_counter() - t_start) * 1000
-            logger.error(f"OCR 识别失败: {e}")
+            _logger.error(f"OCR 识别失败: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -245,7 +239,7 @@ class OCREngine:
             }
         except Exception as e:
             elapsed_ms = (time.perf_counter() - t_start) * 1000
-            logger.error(f"PDF OCR 失败: {e}")
+            _logger.error(f"PDF OCR 失败: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -260,6 +254,6 @@ class OCREngine:
             del self._ocr
             self._ocr = None
         self._ready = False
-        logger.info("PaddleOCR 引擎已卸载")
+        _logger.info("PaddleOCR 引擎已卸载")
 
 

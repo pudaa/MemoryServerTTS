@@ -1,6 +1,9 @@
 import os
 import torch
 from faster_whisper import WhisperModel
+from src.common.logging import get_logger
+
+_logger = get_logger("ASR")
 
 
 class ASRModelManager:
@@ -19,7 +22,7 @@ class ASRModelManager:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         compute_type = "float16" if device == "cuda" else "int8"
 
-        print(f"[ASR] 正在加载Faster Whisper模型: {model_size} on {device}")
+        _logger.info(f"加载 Faster-Whisper: {model_size} on {device} (compute={compute_type})")
 
         try:
             self.model = WhisperModel(
@@ -27,7 +30,7 @@ class ASRModelManager:
                 device=device,
                 compute_type=compute_type,
             )
-            print(f"[ASR] 模型加载成功: {model_size}")
+            _logger.success(f"模型加载成功: {model_size}")
         except Exception as e:
             raise RuntimeError(f"Faster Whisper模型加载失败: {e}")
 

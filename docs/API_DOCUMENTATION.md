@@ -1,6 +1,6 @@
 # MemoryServerTTS API 集成文档
 
-> **项目概述**：MemoryServerTTS 是一个基于 **Qwen3-TTS** 和 **Faster-Whisper** 的语音服务，提供文本转语音（TTS）、语音识别（ASR）以及发音评价三大核心功能，适用于英语学习等场景。
+> **项目概述**：MemoryServerTTS 是一个基于 **Qwen3-TTS**、**Faster-Whisper** 和 **PaddleOCR** 的语音与视觉服务，提供文本转语音（TTS）、语音识别（ASR）、发音评价和 OCR 文字识别四大核心功能，适用于英语学习等场景。
 >
 > **适用场景**：SpringBoot 后端服务通过 HTTP RESTful API 或 WebSocket 接入本服务，实现语音合成、语音转录、发音评分等功能。
 
@@ -26,10 +26,15 @@
    - [6.4 批量音素评分](#64-批量音素评分)
 7. [系统接口](#7-系统接口)
    - [7.1 健康检查](#71-健康检查)
-8. [全局错误处理](#8-全局错误处理)
-9. [SpringBoot 集成示例](#9-springboot-集成示例)
-10. [配置与环境变量](#10-配置与环境变量)
-11. [注意事项](#11-注意事项)
+   - [7.2 管理后台](#72-管理后台)
+8. [OCR 文字识别](#8-ocr-文字识别)
+   - [8.1 图片文字扫描](#81-图片文字扫描)
+   - [8.2 文档文字扫描](#82-文档文字扫描)
+   - [8.3 OCR 健康检查](#83-ocr-健康检查)
+9. [全局错误处理](#9-全局错误处理)
+10. [SpringBoot 集成示例](#10-springboot-集成示例)
+11. [配置与环境变量](#11-配置与环境变量)
+12. [注意事项](#12-注意事项)
 
 ---
 
@@ -41,8 +46,8 @@
 |------|------|
 | Python | 3.10+ |
 | PyTorch | 2.0.1+（推荐 GPU 版，CUDA 11.8+） |
-| 显存 | 1.7B 模型约需 4-6 GB；0.6B 模型约需 2-3 GB |
-| 磁盘 | 模型文件约 3-10 GB |
+| 显存 | 全部模块驻留约需 5.5 GB（1.7B TTS + ASR + OCR） |
+| 磁盘 | 模型文件约 5-12 GB |
 
 ### 1.2 安装与启动
 
@@ -1018,7 +1023,61 @@ boolean isHealthy = "healthy".equals(health.getString("status"));
 
 ---
 
-## 8. 全局错误处理
+## 8. OCR 文字识别
+
+### 8.1 图片文字扫描
+
+```http
+POST /api/v1/ocr/scan
+Content-Type: multipart/form-data
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| image | file | 是 | PNG/JPG/BMP/WEBP |
+| language | string | 否 | en/ch/Multilingual，默认 en |
+
+**成功响应：**
+```json
+{
+    "success": true,
+    "text": "Hello world\nThis is a test",
+    "lines": ["Hello world", "This is a test"],
+    "confidences": [0.985, 0.972],
+    "avg_confidence": 0.9785,
+    "model_tier": "small",
+    "processing_time_ms": 452
+}
+```
+
+### 8.2 文档文字扫描
+
+```http
+POST /api/v1/ocr/scan-file
+Content-Type: multipart/form-data
+```
+
+支持 PDF 文件，返回逐页文本。
+
+### 8.3 OCR 健康检查
+
+```http
+GET /api/v1/ocr/health
+```
+
+返回 OCR 模型状态、当前配置（模型档位/预处理/检测参数）、可用档位和预设列表。
+
+### 8.4 管理后台
+
+```http
+GET /admin
+```
+
+内嵌的单页管理面板，支持 TTS/ASR/OCR/发音评价的在线调试和测速。
+
+---
+
+## 9. 全局错误处理
 
 所有接口在出错时返回统一格式：
 

@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from src.g2p_engine import G2PEngine, get_g2p_engine
+from src.pronunciation.g2p_engine import G2PEngine, get_g2p_engine
 
 
 class PhonemeEvaluator:

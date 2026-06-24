@@ -1,75 +1,93 @@
 # MemoryServerTTS
 
-基于 **Qwen3-TTS** 和 **Faster-Whisper** 的语音服务，提供文本转语音（TTS）、语音识别（ASR）以及发音评价三大核心功能。
+基于 **Qwen3-TTS** + **Faster-Whisper** + **PaddleOCR** 的 AI 语音与视觉服务平台，为英语学习 APP 提供四大核心能力。
 
-## 启动方法
+## 快速开始
 
-1. 安装依赖（建议使用虚拟环境/conda）：
-   ```sh
-   pip install -r requirements.txt
-   ```
-2. 下载模型（已预置在 `models/` 目录下）：
-   - `models/qwen-0.6b/` — 默认主模型（轻量，显存约 2-3 GB）
-   - `models/qwen-1.7b/` — 降级备选模型（效果更好，显存约 4-6 GB）
-3. 启动服务：
-   ```sh
-   python src/server.py
-   # 或
-   python main.py
-   # 或（热重载模式，开发调试用）
-   set RELOAD=1 && python main.py   # Windows
-   RELOAD=1 python main.py          # Linux/macOS
-   ```
+```powershell
+# 1. 环境
+conda create -n memory-tts python=3.12 -y
+conda activate memory-tts
 
-## 目录结构
+# 2. 依赖
+pip install -r requirements.txt
+
+# 3. 启动
+python main.py
+```
+
+管理后台: http://localhost:8000/admin | API 文档: http://localhost:8000/docs
+
+## 项目结构
 
 ```
 MemoryServerTTS/
-├── main.py              # 启动入口
-├── requirements.txt     # 依赖列表
-├── Dockerfile           # Docker 构建
-├── start_server.bat     # Windows 启动脚本
-├── start_server.sh      # Linux 启动脚本
+├── main.py                       # 启动入口
+├── requirements.txt              # Python 依赖
+├── config/ocr.yaml               # OCR 配置
 ├── src/
-│   ├── server.py                   # FastAPI 主服务
-│   ├── model_loader.py             # TTS 模型管理器（Qwen3-TTS）
-│   ├── asr_model_loader.py         # ASR 模型管理器（Faster-Whisper）
-│   ├── pronunciation_evaluator.py  # 发音评价（MFCC+DTW，需参考音频）
-│   ├── phoneme_evaluator.py        # 🔥 音素评价（G2P+ASR，仅需参考文本）
-│   ├── g2p_engine.py               # G2P 引擎（英文/中文）
-│   ├── debug_ui.py                 # Gradio 调试界面（端口 7860）
-│   └── test_official.py            # 官方接口测试脚本
-├── models/qwen-0.6b/   # 0.6B 小模型（默认）
-├── models/qwen-1.7b/   # 1.7B 大模型（降级方案）
-├── voices/             # 音色克隆数据目录
-└── doc/                # 详细文档
+│   ├── server.py                 # FastAPI 主入口
+│   ├── common/                   # 公共基础设施
+│   │   ├── base_config.py        # 统一配置基类
+│   │   └── logging.py            # 统一日志 [MODULE] 前缀
+│   ├── tts/                      # TTS 文本转语音
+│   ├── asr/                      # ASR 语音识别
+│   ├── pronunciation/            # 发音评价
+│   ├── ocr/                      # OCR 文字识别
+│   └── dashboard/                # 管理后台
+├── models/
+│   ├── qwen-1.7b/                # TTS 主模型（默认）
+│   └── qwen-0.6b/                # TTS 降级方案
+├── tests/                        # 测试脚本
+└── docs/                         # 详细文档
 ```
 
-## API 概览
+## API 总览
 
-| 方法 | 路径 | 说明 |
+| 方法 | 路径 | 模块 | 说明 |
+|------|------|------|------|
+| `GET` | `/api/v1/health` | 系统 | 健康检查 |
+| `GET` | `/admin` | 面板 | 管理后台 |
+| `GET` | `/api/v1/tts/voices` | TTS | 音色列表 |
+| `POST` | `/api/v1/tts/synthesize` | TTS | 文本合成语音 |
+| `WS` | `/api/v1/tts/stream` | TTS | 流式合成 |
+| `POST` | `/api/v1/asr/transcribe` | ASR | 语音转文字 |
+| `POST` | `/api/v1/pronunciation/phoneme-score` | 发音 | 音素评价（仅需文本） |
+| `POST` | `/api/v1/pronunciation/score` | 发音 | MFCC+DTW 评价 |
+| `POST` | `/api/v1/ocr/scan` | OCR | 图片文字提取 |
+| `POST` | `/api/v1/ocr/scan-file` | OCR | 文档文字提取 |
+| `GET` | `/api/v1/ocr/health` | OCR | OCR 状态 |
+
+## 模型配置
+
+| 模块 | 模型 | 显存 | 配置方式 |
+|------|------|------|----------|
+| TTS | Qwen3-TTS 1.7B | ~3.9GB | `QWEN_TTS_MODEL_PATH` 环境变量 |
+| ASR | Faster-Whisper base | ~1GB | `WHISPER_MODEL_SIZE` 环境变量 |
+| OCR | PP-OCRv6 Small | ~0.5GB | `config/ocr.yaml` 或 `OCRCONF_MODEL_TIER` |
+| 发音 | G2P + ASR | 复用 ASR | — |
+
+## 硬件要求
+
+| 组件 | 最低 | 推荐（当前） |
+|------|------|-------------|
+| GPU | 6GB VRAM | 8GB (RTX 4060 Laptop) |
+| RAM | 8GB | 16GB |
+| Python | 3.10+ | 3.12 |
+| CUDA | 11.8+ | 12.x |
+
+## 性能参考
+
+| 操作 | 耗时 | 说明 |
 |------|------|------|
-| `GET` | `/api/v1/health` | 健康检查 |
-| `GET` | `/api/v1/tts/voices` | 获取音色列表 |
-| `POST` | `/api/v1/tts/synthesize` | 文本合成语音（WAV） |
-| `WebSocket` | `/api/v1/tts/stream` | 流式语音合成 |
-| `POST` | `/api/v1/tts/clone` | 音色克隆（模拟） |
-| `POST` | `/api/v1/asr/transcribe` | 语音识别（Faster-Whisper） |
-| `GET` | `/api/v1/asr/models` | 支持的 ASR 模型列表 |
-| `POST` | `/api/v1/pronunciation/score` | 🔇 MFCC+DTW 发音评分（需参考音频） |
-| `POST` | `/api/v1/pronunciation/batch-score` | 批量 MFCC+DTW 评分 |
-| `POST` | `/api/v1/pronunciation/phoneme-score` | 🔥 音素对齐发音评分（仅需参考文本，推荐） |
-| `POST` | `/api/v1/pronunciation/phoneme-score-with-text` | 同上（别名接口） |
-| `POST` | `/api/v1/pronunciation/phoneme-batch-score` | 批量音素评分 |
+| TTS（短句） | ~10–15s | 自回归模型限制，建议异步调用 |
+| ASR（1分钟） | ~2–5s | Faster-Whisper base |
+| OCR（图片） | ~450ms | PP-OCRv6 Small + GPU |
+| 发音评价 | ~1–3s | G2P + ASR 音素对齐 |
 
-## 常见问题
+## 文档
 
-- `flash-attn` 不是必须，可忽略相关警告。
-- Windows 下建议直接用 PyTorch 原生注意力机制（`attn_implementation="sdpa"`）。
-- 若报 `sox` 未找到，仅影响部分音频处理功能，可忽略或手动安装 SoX。
-- 推荐使用 Python 3.10+，PyTorch 2.0+。
-- Gradio 调试 UI 默认运行在 `http://localhost:7860`，通过 `python src/debug_ui.py` 启动。
-
-## 详细文档
-
-请参见 [doc/API_DOCUMENTATION.md](doc/API_DOCUMENTATION.md) 获取完整的 API 使用说明。
+- [API 集成文档](docs/API_DOCUMENTATION.md)
+- [OCR 集成文档](docs/OCR_INTEGRATION.md)
+- [项目技术文档](docs/PROJECT_DOCUMENTATION.md)
+- [故障排查](docs/TROUBLESHOOTING_SPRINGBOOT.md)

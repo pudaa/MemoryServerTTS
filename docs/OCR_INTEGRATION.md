@@ -25,28 +25,13 @@ MemoryServerTTS 已集成基于 **PaddleOCR (PP-OCRv6)** 的 OCR 文字识别功
 
 切换方式：
 ```python
-from src.ocr_config import OCRConfig
+from src.ocr.config import OCRConfig
 cfg = OCRConfig()
-cfg.model_tier = "medium"  # 切换到 Medium
+cfg.model_tier = "medium"
 ```
-或修改 `config/ocr_config.yaml` 中的 `ocr.model_tier` 字段。
-或设置环境变量：`$env:OCRCONF_MODEL_TIER = "tiny"`
-```python
-app.state.ocr_engine = OCREngine(engine="paddle_static", lang="en", device="gpu")
-```
+或修改 `config/ocr.yaml`，或设环境变量 `$env:OCRCONF_MODEL_TIER = "tiny"`。
 
-> ⚠️ 注意：PaddlePaddle 可能与 PyTorch 存在依赖冲突。如遇到问题，请使用方案 B 或 C。
-
-### 方案 B：Python 3.12 独立环境
-
-```powershell
-# 创建 Python 3.12 环境专门用于 OCR
-conda create -n ocr-gpu python=3.12 -y
-conda activate ocr-gpu
-pip install paddleocr onnxruntime-gpu
-```
-
-然后修改 `src/server.py` 中的 OCR 引擎配置使用 HTTP 调用独立服务（或直接在 3.12 环境下运行整个项目）。
+## 预处理预设
 
 ### 方案 C：Docker 部署（最稳定）
 
@@ -178,7 +163,7 @@ src/
 ├── server.py           # FastAPI 服务（已添加 OCR 端点）
 ├── test_ocr.py         # 完整验证脚本
 └── test_ocr_quick.py   # 快速测试脚本
-requirements-ocr.txt    # OCR 专用依赖
+requirements.txt        # OCR 依赖已合并到主依赖文件
 ```
 
 ## 故障排除
@@ -194,7 +179,7 @@ requirements-ocr.txt    # OCR 专用依赖
 ### PaddleOCR 导入失败
 
 ```powershell
-pip install -r requirements-ocr.txt
+pip install -r requirements.txt
 ```
 
 ### 模型下载失败
