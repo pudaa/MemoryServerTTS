@@ -1,0 +1,42 @@
+# ═══════════════════════════════════════════════════════════════
+# MemoryServerTTS — TTS 模块配置
+# ═══════════════════════════════════════════════════════════════
+#
+# 优化说明:
+#   torch.compile — 编译模型为优化后的 CUDA 代码，首次加载慢但推理快
+#   tf32_matmul   — 在 Ampere+ GPU 上启用 TF32 矩阵乘法加速
+#
+# 如果遇到问题，将 performance.compile 设为 false 即可回退
+
+tts:
+  # ── 模型 ──
+  engine: sdpa                    # sdpa | flash_attention_2
+  dtype: bfloat16                 # bfloat16 | float32 (float16 不兼容)
+  model_path: ./models/qwen-1.7b  # 空则用环境变量 QWEN_TTS_MODEL_PATH
+
+  # ── 降级模型 ──
+  fallback_model_path: ./models/qwen-0.6b
+
+  # ── 默认参数 ──
+  default_voice: uncle_fu
+  default_language: English
+
+  # ── 性能优化 ──
+  performance:
+    # torch.compile: 编译模型加速推理 (首次编译 ~2-5 分钟，后续加载 ~30s)
+    # 实测: RTX 4060 Laptop 上 RTF 从 ~3.6x 降至 ~1.5-2.0x
+    # 风险: 若编译后推理异常，设为 false 即可回退
+    compile: false                  # 是否启用 torch.compile
+
+    # TF32 矩阵乘法加速 (Ampere+ GPU, CC≥8.0)
+    # 精度损失 <0.1%, 速度提升 ~20%
+    tf32_matmul: true
+
+    # compile 模式: reduce-overhead (推荐) | max-autotune (最快但编译极慢) | default
+    compile_mode: reduce-overhead
+
+  # ── 文本处理 ──
+  text:
+    max_chunk_chars: 250            # 单次生成最大字符数 (超出自动分句)
+    short_text_threshold: 80        # 短文本阈值 (低于此值自动补标点)
+    sentence_pause_ms: 180          # 分句拼接时的句间停顿 (ms)

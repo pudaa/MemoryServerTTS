@@ -18,7 +18,8 @@ from src.asr.model_loader import ASRModelManager
 from src.pronunciation.evaluator import PronunciationEvaluator
 from src.pronunciation.phoneme_evaluator import PhonemeEvaluator
 from src.ocr.engine import OCREngine
-from src.ocr.config import OCRConfig
+from src.tts.config import TTSConfig
+from src.tts.config import TTSConfig
 from src.common.logging import get_logger
 
 _server_logger = get_logger("SERVER")
@@ -35,13 +36,13 @@ app.include_router(dashboard_router)
 
 @app.on_event("startup")
 async def startup_event():
-    app.state.model = TTSModelManager()
+    app.state.tts_config = TTSConfig()
+    app.state.model = TTSModelManager(config=app.state.tts_config)
     app.state.asr_model = ASRModelManager()
     app.state.pronunciation_evaluator = PronunciationEvaluator()
     app.state.phoneme_evaluator = PhonemeEvaluator(app.state.asr_model)
     app.state.ocr_config = OCRConfig()
     app.state.ocr_engine = OCREngine(config=app.state.ocr_config)
-    # 预加载 OCR 模型，避免首次请求时等待
     app.state.ocr_engine.load()
 
 
