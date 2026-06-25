@@ -2,9 +2,17 @@ import os
 import re
 import numpy as np
 import torch
+import torch._dynamo
 from qwen_tts import Qwen3TTSModel
 from src.common.logging import get_logger
 from src.tts.config import TTSConfig
+
+# ── 全局 TF32 加速 (Ampere+ GPU, CC≥8.0) ──
+# 在模块导入时设置一次即可
+try:
+    torch.set_float32_matmul_precision('high')
+except Exception:
+    pass
 
 _logger = get_logger("TTS")
 
@@ -24,11 +32,6 @@ class TTSModelManager:
 
     def _load_model(self):
         cfg = self._config
-
-        # ── TF32 加速 ──
-        if cfg.tf32_enabled:
-            torch.set_float32_matmul_precision('high')
-            _logger.info("TF32 矩阵加速已启用")
 
         local_primary = os.environ.get("QWEN_TTS_MODEL_PATH") or cfg.model_path
         hf_primary = os.environ.get("QWEN_TTS_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")
@@ -81,7 +84,6 @@ class TTSModelManager:
             # ── torch.compile 优化 ──
             if cfg.compile_enabled:
                 _logger.info(f"torch.compile 优化中 (mode={cfg.compile_mode}, 首次较慢)...")
-                import torch._dynamo
                 torch._dynamo.config.suppress_errors = True
                 try:
                     self.model.model = torch.compile(
