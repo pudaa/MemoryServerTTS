@@ -33,3 +33,4 @@ temp/
 # Others
 *.bak
 *.swp
+.workbuddy/

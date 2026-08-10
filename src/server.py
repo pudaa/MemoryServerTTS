@@ -18,7 +18,7 @@ from src.asr.model_loader import ASRModelManager
 from src.pronunciation.evaluator import PronunciationEvaluator
 from src.pronunciation.phoneme_evaluator import PhonemeEvaluator
 from src.ocr.engine import OCREngine
-from src.tts.config import TTSConfig
+from src.ocr.config import OCRConfig
 from src.tts.config import TTSConfig
 from src.common.logging import get_logger
 

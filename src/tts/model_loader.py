@@ -16,6 +16,31 @@ except Exception:
 
 _logger = get_logger("TTS")
 
+# 语言简写/别名 → 完整名称映射（模型支持的完整名称见 get_supported_languages()）。
+# 用于兼容客户端传入的 ISO 语言代码（如 en / zh / ja），不区分大小写。
+_LANGUAGE_ALIASES = {
+    "en": "english", "eng": "english",
+    "zh": "chinese", "zh-cn": "chinese", "zh-hans": "chinese", "zh-hant": "chinese",
+    "ch": "chinese", "cn": "chinese", "chs": "chinese",
+    "fr": "french", "fra": "french", "fre": "french",
+    "de": "german", "deu": "german", "ger": "german",
+    "it": "italian", "ita": "italian",
+    "ja": "japanese", "jp": "japanese", "jpn": "japanese",
+    "ko": "korean", "kr": "korean", "kor": "korean",
+    "pt": "portuguese", "por": "portuguese",
+    "ru": "russian", "rus": "russian",
+    "es": "spanish", "spa": "spanish",
+}
+
+
+def _normalize_language(language):
+    """将语言简写/别名规范化为完整名称（不区分大小写），未命中时原样返回。"""
+    if not language:
+        return language
+    key = str(language).strip().lower()
+    return _LANGUAGE_ALIASES.get(key, str(language).strip())
+
+
 class TTSModelManager:
     _instance = None
 
@@ -137,6 +162,8 @@ class TTSModelManager:
         cfg = self._config
         voice = voice or cfg.default_voice
         language = language or cfg.default_language
+        # 兼容客户端传入的简写语言代码（如 "en" → "english"）
+        language = _normalize_language(language)
 
         text = text.strip()
         text = re.sub(r'\s+', ' ', text)

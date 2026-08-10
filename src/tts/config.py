@@ -36,6 +36,13 @@ class TTSConfig(BaseConfig):
     def fallback_model_path(self) -> str:
         return self._get("tts.fallback_model_path", "./models/qwen-0.6b")
 
+    # ── 性能提示 ──
+    # 对于 8GB VRAM 的 GPU (如 RTX 4060)：
+    #   - 1.7B 模型 (bfloat16) 约需 3.4GB VRAM，生成较慢
+    #   - 0.6B 模型 (bfloat16) 约需 1.2GB VRAM，生成速度快 2-3 倍
+    #   - 对话场景建议使用 0.6B 模型（质量差异在短句中不明显）
+    #   - 在 config/tts.yaml 中设置 tts.model_path: ./models/qwen-0.6b
+
     # ── 默认参数 ──
 
     @property
