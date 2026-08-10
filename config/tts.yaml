@@ -1,12 +1,20 @@
-# ═══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
 # MemoryServerTTS — TTS 模块配置
-# ═══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
 #
 # 优化说明:
 #   torch.compile — 编译模型为优化后的 CUDA 代码，首次加载慢但推理快
 #   tf32_matmul   — 在 Ampere+ GPU 上启用 TF32 矩阵乘法加速
 #
 # 如果遇到问题，将 performance.compile 设为 false 即可回退
+#
+# 短/长文本解码策略（2026-08 起）:
+#   - 单词语音（is_single_word：单个词、无内部空白、剥尾标点后 1 词，
+#     如 ahead / well / 你好）:
+#     温和确定性解码（低温度 + 固定 seed）+ ASR 回读校验闭环，
+#     失败自动换 seed 重试，保证输出可被识别为目标单词。
+#   - 短句与长文本（如 "How are you?"、AI 对话段落）:
+#     保持随机采样更自然，仅做轻量时长校验，失败重试 1 次。
 
 tts:
   # ── 模型 ──
@@ -18,7 +26,9 @@ tts:
   fallback_model_path: ./models/qwen-0.6b
 
   # ── 默认参数 ──
-  default_voice: uncle_fu
+  # default_voice 作为兜底音色；客户端未指定音色时优先按语言自动匹配母语音色
+  # （English→aiden, Chinese→vivian, Japanese→ono_anna, Korean→sohee）
+  default_voice: aiden
   default_language: English
 
   # ── 性能优化 ──
@@ -40,3 +50,43 @@ tts:
     max_chunk_chars: 250            # 单次生成最大字符数 (超出自动分句)
     short_text_threshold: 80        # 短文本阈值 (低于此值自动补标点)
     sentence_pause_ms: 180          # 分句拼接时的句间停顿 (ms)
+    verify_text_threshold: 40       # "单词语音"判定的长度兜底上限（is_single_word）：
+                                    # 仅单个单词（无空格、剥尾标点后 1 词）才走
+                                    # 确定性解码 + ASR 校验闭环；短句/长文本走轻量校验
+
+  # ── 解码策略 ──
+  decoding:
+    short:
+      # 温和确定性：保留轻微韵律变化，稳定性足够（失败可换 seed 重试）
+      temperature: 0.5
+      top_k: 20
+      top_p: 0.9
+      repetition_penalty: 1.2       # 提高惩罚，抑制"嗯嗯啊啊"式填充码循环
+      max_new_tokens: 512           # 12Hz ≈ 12.5 帧/秒，512 帧 ≈ 40s 上限，防止垃圾循环跑满
+      seed: 42                      # 基础 seed；每次重试使用 seed + attempt
+    long:
+      # AI 对话场景：保持随机采样更自然
+      temperature: 0.9
+      top_k: 50
+      top_p: 1.0
+      repetition_penalty: 1.05
+      max_new_tokens: 2048          # 覆盖模型 generation_config 的 8192，防异常长跑
+
+  # ── 生成后校验闭环 ──
+  verification:
+    max_retries: 3                  # 短文本 ASR 校验失败最大重试次数（换 seed）
+    asr_confidence_threshold: -1.0  # ASR 平均对数概率门槛，低于此值判失败
+    word_max_duration_s: 5.0        # 短文本音频时长上限，超限判为失败（垃圾循环特征）
+    long_max_retries: 1             # 长文本轻量校验失败重试次数
+    long_duration_factor: 0.75      # 长文本时长上限 = 字符数 * factor + bias
+    long_duration_bias: 4.0
+
+  # ── 词库缓存（听写场景，Phase 2）──
+  # 听写模块通过 /api/v1/dictation/audio 访问；缓存 key 含 gen_config_version，
+  # 生成配置变更（音色/指令/解码参数/模型）自动失效换代，无需手动清缓存。
+  # 注意：instruct 完全由业务侧（听写模块）传入，服务端不注入任何情绪指令。
+  dictation:
+    cache_dir: word-cache           # 词库音频缓存目录（相对项目根）
+    best_of: 3                      # 预生成/在线回填默认候选数（多 seed 择优）
+    seed_base: 1000                 # 候选 seed 起点（seed_base + i）
+    conf_threshold: -1.0            # 评分置信度门槛（默认与 verification 一致）

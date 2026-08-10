@@ -15,7 +15,9 @@
    - [4.1 合成语音（REST）](#41-合成语音-rest)
    - [4.2 流式合成（WebSocket）](#42-流式合成-websocket)
    - [4.3 获取音色列表](#43-获取音色列表)
-   - [4.4 音色克隆（模拟）](#44-音色克隆模拟)
+   - [4.4 单词语音校验闭环](#44-单词语音校验闭环)
+   - [4.5 词库缓存（听写场景）](#45-词库缓存听写场景)
+   - [4.6 音色克隆（模拟）](#46-音色克隆模拟)
 5. [ASR 语音识别](#5-asr-语音识别)
    - [5.1 转录音频](#51-转录音频)
    - [5.2 获取支持的 ASR 模型](#52-获取支持的-asr-模型)
@@ -135,6 +137,12 @@ docker run -d -p 8000:8000 --gpus all memory-tts
 | `POST` | `/api/v1/tts/synthesize` | 文本合成语音（返回 WAV 文件） |
 | `WebSocket` | `/api/v1/tts/stream` | 流式语音合成 |
 | `POST` | `/api/v1/tts/clone` | 音色克隆（当前为模拟实现） |
+| `GET` | `/api/v1/dictation/audio` | 🔥 听写单词音频（缓存感知，命中即回） |
+| `GET` | `/api/v1/dictation/words` | 词库缓存条目列表（管理员） |
+| `POST` | `/api/v1/dictation/words/{key}/regenerate` | 强制重新生成词条（管理员） |
+| `POST` | `/api/v1/dictation/feedback` | 标记词条 bad 并触发后台重生成（管理员） |
+| `POST` | `/api/v1/dictation/pregenerate` | 批量预生成（管理员，后台任务） |
+| `GET` | `/api/v1/dictation/tasks/{id}` | 预生成任务进度轮询 |
 | `POST` | `/api/v1/asr/transcribe` | 音频文件转录 |
 | `GET` | `/api/v1/asr/models` | 获取支持 ASR 模型列表 |
 | `POST` | `/api/v1/pronunciation/score` | 发音评分（MFCC+DTW，需参考音频） |
@@ -166,10 +174,13 @@ http://<server-ip>:8000
 ```json
 {
   "text": "Hello, welcome to Memory English Learning App!",
-  "voice": "Ono_Anna",
+  "voice": "aiden",
   "language": "English",
   "instructions": "Speak with a happy and encouraging tone.",
-  "output_format": "wav"
+  "output_format": "wav",
+  "verify": null,
+  "seed": null,
+  "include_meta": false
 }
 ```
 
@@ -178,16 +189,47 @@ http://<server-ip>:8000
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `text` | string | ✅ | - | 要合成的文本内容 |
-| `voice` | string | ❌ | `"Ono_Anna"` | 音色 ID（详见 4.3 节） |
-| `language` | string | ❌ | `"English"` | 语言，支持 `English`、`Chinese`、`Japanese`、`Korean` 等 |
-| `instructions` | string | ❌ | `null` | 情感/风格指令，如 `"Speak with a happy tone."` |
+| `voice` | string | ❌ | `""`（自动） | 音色 ID（详见 4.3 节）；留空时按语言自动匹配母语音色（English→aiden） |
+| `language` | string | ❌ | `"English"` | 语言，支持 `English`、`Chinese`、`Japanese`、`Korean` 等，兼容 `en`/`zh` 简写 |
+| `instructions` | string | ❌ | `null` | 情感/风格指令，如 `"Speak with a happy tone."`（由业务侧传入，服务端不注入） |
 | `output_format` | string | ❌ | `"wav"` | 输出格式，当前仅支持 `"wav"` |
+| `verify` | bool\|null | ❌ | `null` | `null`=自动（仅单词语音走 ASR 校验闭环）；`true`=强制 ASR 校验（仅对单词语音生效）；`false`=跳过 ASR 校验（仍做时长检查） |
+| `seed` | int\|null | ❌ | `null` | 基础随机种子；单词语音重试时使用 `seed + attempt`，留空用配置默认（42） |
+| `include_meta` | bool | ❌ | `false` | `true` 时返回 JSON（含校验元信息），否则返回 WAV 二进制流 |
 
 #### 成功响应
 
 - **状态码**: `200 OK`
 - **Content-Type**: `audio/wav`
 - **响应体**: 二进制 WAV 音频数据（文件名格式：`tts_<hex>.wav`）
+- **校验元信息（响应头）**:
+
+| 响应头 | 说明 |
+|--------|------|
+| `X-TTS-Verified` | 是否通过 ASR 校验（`true`/`false`） |
+| `X-TTS-Attempts` | 生成尝试次数 |
+| `X-TTS-Strategy` | `short`（单词语音）/ `long`（短句/长文本） |
+| `X-TTS-Duration` | 音频时长（秒） |
+| `X-TTS-Seed` | 实际使用的 seed |
+| `X-TTS-Asr-Text` | ASR 回读文本（URL 编码） |
+| `X-TTS-Asr-Confidence` | ASR 平均对数概率 |
+
+当 `include_meta=true` 时返回 JSON：
+
+```json
+{
+  "audioUrl": "/tts-audio/tts_xxx.wav",
+  "duration": 0.62,
+  "verified": true,
+  "attempts": 1,
+  "strategy": "short",
+  "seed": 42,
+  "asrText": "ahead",
+  "asrConfidence": -0.31
+}
+```
+
+> **单词语音校验闭环**：当 `text` 是**单个单词**（无内部空白、剥离尾部标点后 1 个词，如 `ahead`/`well`/`你好`）时，服务端自动启用：温和确定性解码 + ASR 回读校验 + 失败换 seed 重试（最多 3 次）。重试仍失败则**宽松降级**：返回最后一次音频并标记 `verified=false`（详见 4.4 节）。短句与长文本不经过严格 ASR 校验，保持自然随机采样。
 
 #### 错误响应
 
@@ -212,7 +254,7 @@ headers.setContentType(MediaType.APPLICATION_JSON);
 
 JSONObject requestBody = new JSONObject();
 requestBody.put("text", "Hello, welcome to Memory English Learning App!");
-requestBody.put("voice", "Ono_Anna");
+requestBody.put("voice", "aiden");
 requestBody.put("language", "English");
 requestBody.put("instructions", "Speak with a happy and encouraging tone.");
 
@@ -395,12 +437,31 @@ public class TtsWebSocketClient {
 {
   "voices": [
     {
+      "id": "ryan",
+      "name": "Ryan",
+      "gender": "Male",
+      "language": "English",
+      "desc": "富有节奏感的动感男声",
+      "type": "preset",
+      "native": "English"
+    },
+    {
+      "id": "aiden",
+      "name": "Aiden",
+      "gender": "Male",
+      "language": "English",
+      "desc": "阳光的美式男声，音色明亮",
+      "type": "preset",
+      "native": "English"
+    },
+    {
       "id": "vivian",
       "name": "Vivian",
       "gender": "Female",
       "language": "Chinese",
       "desc": "明亮、略带锋芒的年轻女性声音",
-      "type": "preset"
+      "type": "preset",
+      "native": "Chinese"
     },
     {
       "id": "serena",
@@ -408,63 +469,53 @@ public class TtsWebSocketClient {
       "gender": "Female",
       "language": "Chinese",
       "desc": "温暖、温柔的年轻女性声音",
-      "type": "preset"
+      "type": "preset",
+      "native": "Chinese"
     },
     {
       "id": "uncle_fu",
       "name": "Uncle_Fu",
       "gender": "Male",
       "language": "Chinese",
-      "desc": "经验丰富的男性嗓音，音色低沉柔和",
-      "type": "preset"
+      "desc": "经验丰富的成熟男性嗓音",
+      "type": "preset",
+      "native": "Chinese"
     },
     {
       "id": "dylan",
       "name": "Dylan",
       "gender": "Male",
-      "language": "Chinese (Beijing Dialect)",
-      "desc": "年轻的北京男性嗓音，音色清晰自然",
-      "type": "preset"
+      "language": "Chinese",
+      "desc": "年轻的北京男性嗓音",
+      "type": "preset",
+      "native": "Chinese (Beijing Dialect)"
     },
     {
       "id": "eric",
       "name": "Eric",
       "gender": "Male",
-      "language": "Chinese (Sichuan Dialect)",
-      "desc": "活泼的成都男声，带着一丝沙哑明亮",
-      "type": "preset"
-    },
-    {
-      "id": "Ono_Anna",
-      "name": "Ono_Anna",
-      "gender": "Male",
-      "language": "English",
-      "desc": "充满活力的男性声音，节奏感强劲",
-      "type": "preset"
-    },
-    {
-      "id": "aiden",
-      "name": "Aiden",
-      "gender": "Male",
-      "language": "English",
-      "desc": "阳光的美国男声，中音清晰",
-      "type": "preset"
+      "language": "Chinese",
+      "desc": "活泼的成都男声",
+      "type": "preset",
+      "native": "Chinese (Sichuan Dialect)"
     },
     {
       "id": "ono_anna",
       "name": "Ono_Anna",
       "gender": "Female",
       "language": "Japanese",
-      "desc": "活泼的日本女性声音，音色轻盈灵巧",
-      "type": "preset"
+      "desc": "活泼的日本女性声音",
+      "type": "preset",
+      "native": "Japanese"
     },
     {
       "id": "sohee",
       "name": "Sohee",
       "gender": "Female",
       "language": "Korean",
-      "desc": "温暖的韩国女性声音，情感丰富",
-      "type": "preset"
+      "desc": "温暖的韩国女性声音",
+      "type": "preset",
+      "native": "Korean"
     }
   ]
 }
@@ -472,19 +523,19 @@ public class TtsWebSocketClient {
 
 #### 预设音色速查表
 
-| 音色 ID | 语言 | 性别 | 说明 |
+| 音色 ID | 母语 | 性别 | 说明 |
 |---------|------|------|------|
+| `ryan` | 英文 | 男 | 富有节奏感、动感 |
+| `aiden` | 英文 | 男 | 阳光、音色明亮 |
 | `vivian` | 中文 | 女 | 明亮、略带锋芒 |
 | `serena` | 中文 | 女 | 温暖、温柔 |
 | `uncle_fu` | 中文 | 男 | 低沉柔和 |
 | `dylan` | 中文（北京话） | 男 | 清晰自然 |
 | `eric` | 中文（四川话） | 男 | 活泼、沙哑明亮 |
-| `Ono_Anna` | 英文 | 男 | 充满活力、节奏感强 |
-| `aiden` | 英文 | 男 | 阳光、中音清晰 |
 | `ono_anna` | 日文 | 女 | 轻盈灵巧 |
 | `sohee` | 韩文 | 女 | 情感丰富 |
 
-> **注意**：`Ono_Anna`（英文男声）和 `ono_anna`（日文女声）是大小写不同的两个独立音色，调用时需使用正确的 ID。
+> **重要**：音色 ID 不区分大小写（模型侧自动归一）。官方建议使用音色**母语**生成以获得最佳质量；`voice` 留空时服务端会按 `language` 自动匹配母语音色（English→aiden、Chinese→vivian、Japanese→ono_anna、Korean→sohee）。
 
 如果 `voices/` 目录下存在自定义音色 JSON 文件，也会一并返回，`type` 为 `"cloned"`。
 
@@ -499,7 +550,119 @@ JSONArray voices = response.getJSONArray("voices");
 
 ---
 
-### 4.4 音色克隆（模拟）
+### 4.4 单词语音校验闭环
+
+**背景**：Qwen3-TTS 对单个单词（如 `ahead`）的合成容易产出无意义音节（"嗯嗯啊啊"），且无法人工干预。服务端对**单词语音**自动启用校验闭环：确定性解码 + ASR 回读 + 换 seed 重试。
+
+#### 单词语音判定规则（`is_single_word`）
+
+满足以下全部条件才视为"单词"：
+
+1. 剥离尾部标点（含服务端自动补的句号）后非空
+2. **无内部空白**（多个词 / 短句 → 不是单词）
+3. 由英文字母/数字/连字符/撇号构成，或为纯中文串（无空格视为单个词）
+4. 长度 ≤ `verify_text_threshold`（默认 40）
+
+| 输入 | 判定 | 策略 |
+|------|------|------|
+| `ahead` / `Ahead.` / `well` / `你好` / `don't` | ✅ 单词语音 | 确定性解码 + ASR 校验 + 重试 |
+| `Hello. This is a speed benchmark test.` | ❌ 短句 | 随机采样 + 轻量时长校验 |
+| `How are you?` / `in the morning` | ❌ 多词/短语 | 随机采样 + 轻量时长校验 |
+
+#### 校验流程
+
+1. 温和确定性解码：`temperature=0.5, top_k=20, top_p=0.9, repetition_penalty=1.2, max_new_tokens=512`，固定 seed（默认 42）
+2. 时长检查：超出 `0.05s ~ 5s` 判失败（填充码循环特征）
+3. ASR 回读（Faster-Whisper）：宽松匹配（去空格子串/编辑距离≤1，容忍 `ahead ↔ "a head" ↔ "Mm-hmm, ahead."`）+ 置信度门槛（`avg_logprob ≥ -1.0`）
+4. 失败则 `seed + 1` 重试，最多 3 次
+5. 全部失败 → **宽松降级**：返回最后一次音频，`X-TTS-Verified: false`（客户端可提示重听/重生成）
+
+#### 行为边界
+
+- 校验仅在 `verify != false` 时启用；`verify=true` 可强制，但**仅对单词语音生效**
+- `/stream`（SSE）与 WebSocket **默认不校验**（实时性优先），`/stream` 传 `verify=true` 可逐块开启
+- 0.6B 模型不支持 `instruct`（静默丢弃），单词语音建议使用 1.7B
+
+---
+
+### 4.5 词库缓存（听写场景）
+
+听写模块的单词音频走**缓存感知接口**：命中直接返回（零生成延迟），未命中实时生成并回填缓存。词库由管理员通过 CLI 或管理页批量预生成，可试听、标记 bad、重新生成。
+
+> 设计要点：缓存 key = hash(单词 | 音色 | 语言 | **instruct** | gen_config_version)。
+> `gen_config_version` 对生成配方（模型路径 + 解码参数 + 校验参数）自动哈希——升级生成配置即**自动整库换代**，无需手动清缓存。
+> `instruct` 由业务侧传入并参与缓存 key：不同指令（不同情绪风格）= 不同音频，互不污染。
+
+#### 4.5.1 获取单词音频
+
+`GET /api/v1/dictation/audio`
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `word` | string | ✅ | - | 目标单词 |
+| `voice` | string | ❌ | `""`（按语言自动） | 音色 ID |
+| `language` | string | ❌ | `"English"` | 语言 |
+| `instruct` | string | ❌ | `null` | 风格指令（业务侧控制情绪，如 `"Speak in a calm tone"`） |
+| `include_meta` | bool | ❌ | `false` | `true` 返回 JSON，否则返回 WAV |
+| `best_of` | int | ❌ | `3` | 在线生成时候选数（多 seed 择优） |
+
+- **命中缓存**（且未被标记 bad）→ 直接返回，`X-Dict-Source: cache`
+- **未命中 / 被标 bad** → 实时生成（best-of-N + ASR 校验）并回填，`X-Dict-Source: generated`
+- **所有候选未通过校验** → `502` 且**不入缓存**（宁缺毋滥）
+
+响应头（WAV 模式）：`X-Dict-Key`、`X-Dict-Source`（cache/generated）、`X-Dict-Verified`、`X-Dict-Score`、`X-Dict-Duration`、`X-Dict-Bad`、`X-Dict-Warning`（0.6B 丢 instruct 时提示）。
+
+`include_meta=true` 返回：
+
+```json
+{
+  "audioUrl": "/api/v1/dictation/audio?word=ahead&voice=aiden&language=English",
+  "key": "9f2c...",
+  "source": "cache",
+  "verified": true,
+  "score": 0.92,
+  "duration": 0.61,
+  "bad": false,
+  "asrText": "ahead"
+}
+```
+
+#### 4.5.2 管理员接口
+
+| 接口 | 说明 |
+|------|------|
+| `GET /api/v1/dictation/words` | 缓存条目列表 + 统计（`summary.total/verified/unverified/bad`） |
+| `POST /api/v1/dictation/words/{key}/regenerate` | 按词条规格重新生成（body：`{"best_of": 3}`），择优替换 |
+| `POST /api/v1/dictation/feedback` | 标记 bad 并触发后台重生成，body：`{"key": "...", "reason": "emotion"}`，返回 `taskId` |
+| `POST /api/v1/dictation/pregenerate` | 批量预生成（后台任务），body：`{"words": [{"word","voice","language","instruct"}], "best_of": 3}`，返回 `taskId` |
+| `GET /api/v1/dictation/tasks/{id}` | 任务进度：`{status, total, done, current, results}` |
+
+`feedback` 的 `reason` 建议值：`emotion` / `noise` / `wrong_pronunciation` / `unclear` / 自定义。标记 bad 后该词条不再对外服务，后台自动重生成并择优替换（新条目自动清除 bad 标记）。
+
+#### 4.5.3 离线批量预生成（CLI，推荐）
+
+```bash
+# 纯单词列表
+python -m src.dictation.pregenerate --words ahead,behind,cat
+
+# 词表文件（一行一个单词）
+python -m src.dictation.pregenerate --file words.txt
+
+# CSV：word,voice,language,instruct（instruct 可留空）
+python -m src.dictation.pregenerate --file words.csv --best-of 5
+```
+
+- **强制使用 1.7B 模型**（0.6B 不支持 instruct）
+- 每个词 best-of-N 多 seed 生成 + ASR 校验，仅最优候选入库（`word-cache/` 目录）
+- 退出码：全部成功 `0`，有失败 `1`（可在 CI/批处理中检测）
+
+#### 4.5.4 管理员页面
+
+`/admin` → "词库管理" tab：缓存统计、批量预生成表单（任务进度轮询）、词条表格（试听 / 标记 bad / 重新生成）。
+
+---
+
+### 4.6 音色克隆（模拟）
 
 `POST /api/v1/tts/clone`
 
@@ -1265,27 +1428,29 @@ tts:
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
-| `QWEN_TTS_MODEL_PATH` | `"./models/qwen-0.6b"` | 本地 TTS 模型路径（优先加载的小模型） |
-| `QWEN_TTS_MODEL` | `"Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"` | HuggingFace 模型名称（本地不存在时的回退） |
+| `QWEN_TTS_MODEL_PATH` | `"./models/qwen-1.7b"` | 本地 TTS 模型路径（主模型 1.7B） |
+| `QWEN_TTS_MODEL` | `"Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"` | HuggingFace 模型名称（本地不存在时的回退） |
+| `TTSCONF_MODEL_PATH` | 同 `QWEN_TTS_MODEL_PATH` | TTSConfig 环境变量覆盖（词库 CLI 用它强制 1.7B） |
 | `WHISPER_MODEL_SIZE` | `"base"` | Faster-Whisper 模型尺寸（可选：tiny/base/small/medium/large-v3 等） |
 | `RELOAD` | `"0"` | 设为 `"1"` 启用 uvicorn 热重载（开发调试用，生产环境建议关闭） |
 
 ### 模型加载策略
 
-TTS 模型加载优先级（**内存友好策略** — 优先加载 0.6B 小模型）：
+TTS 模型加载优先级（**质量优先 — 1.7B 主模型**，0.6B 仅降级兜底）：
 
-1. **主尝试**：加载 `QWEN_TTS_MODEL_PATH` 指定的本地路径（默认 `./models/qwen-0.6b`）
-2. **回退**：若本地路径不存在，从 HuggingFace 下载 `QWEN_TTS_MODEL`（默认 `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice`）
-3. **降级**：若 0.6B 模型全部加载失败，尝试 1.7B 模型：先 `./models/qwen-1.7b`（本地），再 `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice`（HuggingFace）
+1. **主尝试**：加载 `QWEN_TTS_MODEL_PATH` 指定的本地路径（默认 `./models/qwen-1.7b`）
+2. **回退**：若本地路径不存在，从 HuggingFace 下载 `QWEN_TTS_MODEL`（默认 `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice`）
+3. **降级**：若 1.7B 模型全部加载失败，尝试 0.6B 模型：先 `./models/qwen-0.6b`（本地），再 `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice`（HuggingFace）
 
-> **注意**：代码实际策略是 **0.6B 优先**（非文档旧版所述的 1.7B 优先），以节省显存。可通过环境变量修改默认路径。当 GPU 支持 Ampere 架构（SM 8.0+）时自动启用 `bfloat16` 精度，否则使用 `float32`。
+> ⚠️ **0.6B 不支持 `instruct`**（qwen_tts 静默丢弃指令）；听写词库预生成通过 `TTSCONF_MODEL_PATH` 强制 1.7B。当 GPU 支持 Ampere 架构（SM 8.0+）时自动启用 `bfloat16` 精度，否则使用 `float32`；另有 `torch.compile` / TF32 可选加速（`config/tts.yaml`）。
 
 ### 服务端口
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| FastAPI 主服务 | `8000` | REST + WebSocket |
-| Gradio 调试 UI | `7860` | 仅调试使用（位于 `src/debug_ui.py`） |
+| FastAPI 主服务 | `8000` | REST + WebSocket + 管理后台（`/admin`） |
+
+> Gradio 调试界面已移除，调试请使用 `/admin` 管理后台。
 
 ---
 
@@ -1298,6 +1463,9 @@ TTS 模型加载优先级（**内存友好策略** — 优先加载 0.6B 小模�
 3. **单线程模型锁**：TTS 模型使用 `asyncio.Lock`，并发场景下需排队。
 4. **音素评价依赖**：英文 G2P 需安装 `g2p-en`（含神经网络模型，首次使用会下载约 20MB 的模型文件）；中文 G2P 需 `pypinyin`。
 5. **批量音素评分**：`/api/v1/pronunciation/phoneme-batch-score` 当前为简化实现，建议在 SpringBoot 端循环调用单条接口。
+6. **单词语音校验开销**：单词语音（`is_single_word`）生成后会在**模型锁内**做 ASR 回读校验（最长重试 3 次），单次请求延迟增加约 0.5-1.5s；短句与长文本不受影响。听写场景建议走词库缓存（4.5 节）消除重复校验。
+7. **0.6B 模型不支持 `instruct`**：0.6B 会**静默丢弃** `instructions` 参数（qwen_tts 包行为）；听写词库预生成固定使用 1.7B。
+8. **词库缓存自动换代**：缓存 key 含 `gen_config_version`（模型路径 + 解码参数 + 校验参数的自动哈希），修改生成配置后旧条目自动失效并按需重生成，无需手动清缓存。
 
 ### 11.2 性能建议
 
@@ -1305,6 +1473,8 @@ TTS 模型加载优先级（**内存友好策略** — 优先加载 0.6B 小模�
 - 0.6B 模型适合低显存环境（2-3 GB），合成速度略快但音质稍逊。
 - 高并发场景建议部署多个 TTS 服务实例，前端做负载均衡。
 - WebSocket 流式合成适合长文本，可减少等待时间。
+- 听写单词音频建议走**词库缓存**（`/api/v1/dictation/audio`）：命中零生成延迟；大批量词库用 CLI 离线预生成（独立进程，不占用在线 GPU 资源）。
+- 服务内后台预生成/重生成任务与在线请求**共用模型锁**（串行排队），大批量任务请用 CLI 而非管理页批量触发。
 
 ### 11.3 网络与代理
 
@@ -1322,34 +1492,30 @@ MemoryServerTTS/
 ├── main.py                         # 启动入口（支持 RELOAD 环境变量控制热重载）
 ├── requirements.txt                # Python 依赖
 ├── Dockerfile                      # Docker 构建文件
-├── start_server.bat                # Windows 启动脚本
-├── start_server.sh                 # Linux/macOS 启动脚本
+├── config/                         # 模块配置（tts.yaml / ocr.yaml）
+├── start_server.bat / start_server.sh  # 一键启动脚本
 ├── README.md                       # 项目 README
 ├── src/
-│   ├── __init__.py                 # 空文件，包标记
-│   ├── server.py                   # FastAPI 主服务（所有 API 端点）
-│   ├── model_loader.py             # TTS 模型管理器（Qwen3-TTS，0.6B→1.7B 两级降级）
-│   ├── asr_model_loader.py         # ASR 模型管理器（Faster-Whisper）
-│   ├── pronunciation_evaluator.py  # 发音评价器（MFCC + DTW，需参考音频）
-│   ├── phoneme_evaluator.py        # 🔥 音素评价器（G2P + ASR 对齐，仅需参考文本）
-│   ├── g2p_engine.py               # 🔥 G2P 引擎抽象层（英文 g2p-en / 中文 pypinyin）
-│   ├── debug_ui.py                 # Gradio 调试界面（端口 7860）
-│   └── test_official.py            # 官方接口测试脚本（含 SSL 配置参考）
+│   ├── server.py                   # FastAPI 主服务（路由挂载 + 生命周期 + WebSocket）
+│   ├── common/                     # base_config.py / logging.py
+│   ├── tts/                        # Qwen3-TTS（config / model_loader / router / verifier）
+│   ├── asr/                        # Faster-Whisper（model_loader / router）
+│   ├── pronunciation/              # 发音评价（evaluator / phoneme_evaluator / g2p_engine / router）
+│   ├── ocr/                        # PaddleOCR（config / engine / router）
+│   ├── dictation/                  # 🔥 词库缓存（cache / generator / spec / router / pregenerate CLI）
+│   └── dashboard/                  # /admin 管理后台（templates/index.html）
 ├── models/
-│   ├── qwen-1.7b/                  # Qwen3-TTS 1.7B 大模型（降级方案）
-│   │   ├── config.json
-│   │   ├── model.safetensors
-│   │   ├── tokenizer_config.json
-│   │   └── speech_tokenizer/
-│   └── qwen-0.6b/                  # Qwen3-TTS 0.6B 小模型（默认主模型）
-│       ├── config.json
-│       ├── model.safetensors
-│       ├── tokenizer_config.json
-│       └── speech_tokenizer/
+│   ├── qwen-1.7b/                  # Qwen3-TTS 1.7B 主模型（默认，支持 instruct）
+│   └── qwen-0.6b/                  # Qwen3-TTS 0.6B 降级模型（不支持 instruct）
+├── tests/                          # 单元测试（test_tts_verifier / test_dictation_cache / test_tts_model_loader ...）
+├── tts-audio/                      # 流式/合成输出音频（/tts-audio 静态挂载）
+├── word-cache/                     # 🔥 词库缓存（运行时生成，/api/v1/dictation 使用）
 ├── voices/                         # 音色克隆数据目录
-└── doc/
+└── docs/
     ├── API_DOCUMENTATION.md        # 本文件
-    ├── phoneme-score-fix.md        # 发音评价接口修复指南
+    ├── CONSTRAINTS.md              # 🔥 约束与约定文档（修改代码前必读）
+    ├── PROJECT_DOCUMENTATION.md    # 项目完整技术文档
+    ├── OCR_INTEGRATION.md
     └── TROUBLESHOOTING_SPRINGBOOT.md  # SpringBoot 接入排错指南
 ```
 

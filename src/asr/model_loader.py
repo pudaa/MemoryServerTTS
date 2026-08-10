@@ -65,6 +65,8 @@ class ASRModelManager:
                 "text": "",
                 "language": info.language,
                 "language_probability": info.language_probability,
+                "duration": getattr(info, "duration", None),
+                "avg_logprob": None,
                 "segments": [],
             }
 
@@ -92,6 +94,10 @@ class ASRModelManager:
                 result["text"] += segment.text + " "
 
             result["text"] = result["text"].strip()
+            # 平均对数概率（各 segment 均值），供 TTS 校验闭环做置信度门槛
+            confs = [s.get("confidence") for s in result["segments"] if s.get("confidence") is not None]
+            if confs:
+                result["avg_logprob"] = sum(confs) / len(confs)
             return result
 
         except Exception as e:

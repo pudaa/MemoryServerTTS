@@ -6,11 +6,13 @@ MemoryServerTTS API 主入口
 import asyncio, base64
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 
 from src.tts.router import router as tts_router
 from src.asr.router import router as asr_router
 from src.pronunciation.router import router as pronunciation_router
 from src.ocr.router import router as ocr_router
+from src.dictation.router import router as dictation_router
 from src.dashboard.router import router as dashboard_router
 
 from src.tts.model_loader import TTSModelManager
@@ -31,7 +33,11 @@ app.include_router(tts_router)
 app.include_router(asr_router)
 app.include_router(pronunciation_router)
 app.include_router(ocr_router)
+app.include_router(dictation_router)
 app.include_router(dashboard_router)
+
+# 流式/合成输出音频的静态访问（/stream、include_meta 返回的 audioUrl 依赖此挂载）
+app.mount("/tts-audio", StaticFiles(directory="tts-audio", check_dir=False), name="tts-audio")
 
 
 @app.on_event("startup")
@@ -58,8 +64,12 @@ async def websocket_stream(websocket: WebSocket):
             if data.get("type") != "text_chunk":
                 await websocket.send_json({"type": "error", "message": "Unsupported message type"}); continue
             async with app.state.model_lock:
-                wavs, sr = app.state.model.generate(text=data["data"], voice=data.get("voice", "Ono_Anna"),
-                    language=data.get("language", "English"), instructions=data.get("instructions"), streaming=True)
+                wavs, sr, _meta = app.state.model.generate(
+                    text=data["data"], voice=data.get("voice", "aiden"),
+                    language=data.get("language", "English"),
+                    instructions=data.get("instructions"), streaming=True,
+                    verify=False,  # 实时流式不做 ASR 校验
+                )
             wav = wavs[0]
             pcm = (wav * 32767.0).clip(-32768, 32767).astype(np.int16).tobytes()
             await websocket.send_json({"type": "audio_chunk", "sample_rate": sr, "format": "pcm16", "data": base64.b64encode(pcm).decode()})

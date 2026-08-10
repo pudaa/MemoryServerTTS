@@ -38,9 +38,9 @@ class TTSConfig(BaseConfig):
 
     # ── 性能提示 ──
     # 对于 8GB VRAM 的 GPU (如 RTX 4060)：
-    #   - 1.7B 模型 (bfloat16) 约需 3.4GB VRAM，生成较慢
-    #   - 0.6B 模型 (bfloat16) 约需 1.2GB VRAM，生成速度快 2-3 倍
-    #   - 对话场景建议使用 0.6B 模型（质量差异在短句中不明显）
+    #   - 1.7B 模型 (bfloat16) 约需 3.4GB VRAM
+    #   - 0.6B 模型 (bfloat16) 约需 1.2GB VRAM
+    #   - 对话场景建议使用 1.7B 模型（质量差异在短句中不明显）
     #   - 在 config/tts.yaml 中设置 tts.model_path: ./models/qwen-0.6b
 
     # ── 默认参数 ──
@@ -86,6 +86,78 @@ class TTSConfig(BaseConfig):
     @property
     def sentence_pause_ms(self) -> int:
         return int(self._get("tts.text.sentence_pause_ms", 180))
+
+    # ── 短/长文本分治 ──
+
+    @property
+    def verify_text_threshold(self) -> int:
+        """单词语音判定的长度兜底上限（is_single_word 的 max_chars）"""
+        return int(self._get("tts.text.verify_text_threshold", 40))
+
+    @property
+    def short_decode(self) -> dict:
+        """短文本（单词/听写）解码参数：温和确定性"""
+        return dict(
+            temperature=float(self._get("tts.decoding.short.temperature", 0.5)),
+            top_k=int(self._get("tts.decoding.short.top_k", 20)),
+            top_p=float(self._get("tts.decoding.short.top_p", 0.9)),
+            repetition_penalty=float(self._get("tts.decoding.short.repetition_penalty", 1.2)),
+            max_new_tokens=int(self._get("tts.decoding.short.max_new_tokens", 512)),
+            seed=int(self._get("tts.decoding.short.seed", 42)),
+        )
+
+    @property
+    def long_decode(self) -> dict:
+        """长文本（AI 对话）解码参数：保持随机采样"""
+        return dict(
+            temperature=float(self._get("tts.decoding.long.temperature", 0.9)),
+            top_k=int(self._get("tts.decoding.long.top_k", 50)),
+            top_p=float(self._get("tts.decoding.long.top_p", 1.0)),
+            repetition_penalty=float(self._get("tts.decoding.long.repetition_penalty", 1.05)),
+            max_new_tokens=int(self._get("tts.decoding.long.max_new_tokens", 2048)),
+        )
+
+    @property
+    def verify_max_retries(self) -> int:
+        return int(self._get("tts.verification.max_retries", 3))
+
+    @property
+    def asr_confidence_threshold(self) -> float:
+        return float(self._get("tts.verification.asr_confidence_threshold", -1.0))
+
+    @property
+    def word_max_duration_s(self) -> float:
+        return float(self._get("tts.verification.word_max_duration_s", 5.0))
+
+    @property
+    def long_max_retries(self) -> int:
+        return int(self._get("tts.verification.long_max_retries", 1))
+
+    # ── 词库缓存（听写场景）──
+
+    @property
+    def dictation_cache_dir(self) -> str:
+        return self._get("tts.dictation.cache_dir", "word-cache")
+
+    @property
+    def dictation_best_of(self) -> int:
+        return int(self._get("tts.dictation.best_of", 3))
+
+    @property
+    def dictation_seed_base(self) -> int:
+        return int(self._get("tts.dictation.seed_base", 1000))
+
+    @property
+    def dictation_conf_threshold(self) -> float:
+        return float(self._get("tts.dictation.conf_threshold", -1.0))
+
+    @property
+    def long_duration_factor(self) -> float:
+        return float(self._get("tts.verification.long_duration_factor", 0.75))
+
+    @property
+    def long_duration_bias(self) -> float:
+        return float(self._get("tts.verification.long_duration_bias", 4.0))
 
     # ── 导出 ──
 

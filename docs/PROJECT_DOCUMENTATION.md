@@ -1,8 +1,10 @@
 # MemoryServerTTS 项目完整技术文档
 
-> **版本**：2.0 | **日期**：2026-06-04 | **语言**：Python 3.12 | **框架**：FastAPI + Uvicorn | **TTS**：Qwen3-TTS | **ASR**：Faster-Whisper
+> **版本**：2.1 | **更新**：2026-08-10（短/长文本分治、单词语音校验闭环、词库缓存 Phase 2） | **语言**：Python 3.12 | **框架**：FastAPI + Uvicorn | **TTS**：Qwen3-TTS | **ASR**：Faster-Whisper
 
 ---
+
+> 🔥 **修改代码前必读**：[约束与约定文档](CONSTRAINTS.md)（架构/模型/接口/缓存/并发边界，约束编号 C/M/G/D/A/P/T）
 
 ## 目录
 
@@ -16,11 +18,12 @@
    - [2.3 服务端-客户端联动全景](#23-服务端-客户端联动全景)
 3. [环境依赖](#3-环境依赖)
 4. [模块详解](#4-模块详解)
-   - [4.1 TTS 模型管理器 — `model_loader.py`](#41-tts-模型管理器--model_loaderpy)
-   - [4.2 ASR 模型管理器 — `asr_model_loader.py`](#42-asr-模型管理器--asr_model_loaderpy)
-   - [4.3 发音评价器（MFCC+DTW）— `pronunciation_evaluator.py`](#43-发音评价器mfccdtw--pronunciation_evaluatorpy)
-   - [4.4 G2P 引擎 — `g2p_engine.py`](#44-g2p-引擎--g2p_enginepy)
-   - [4.5 音素发音评价器 — `phoneme_evaluator.py`](#45-音素发音评价器--phoneme_evaluatorpy)
+   - [4.1 TTS 模型管理器 — `src/tts/model_loader.py`](#41-tts-模型管理器--srcttsmodel_loaderpy)
+     - [4.1.1 短/长文本分治与单词语音校验闭环](#411-短长文本分治与单词语音校验闭环2026-08-起)
+   - [4.2 ASR 模型管理器 — `src/asr/model_loader.py`](#42-asr-模型管理器--srcasrmodel_loaderpy)
+   - [4.3 发音评价器（MFCC+DTW）— `pronunciation/evaluator.py`](#43-发音评价器mfccdtw--pronunciationevaluatorpy)
+   - [4.4 G2P 引擎 — `pronunciation/g2p_engine.py`](#44-g2p-引擎--pronunciationg2p_enginepy)
+   - [4.5 音素发音评价器 — `pronunciation/phoneme_evaluator.py`](#45-音素发音评价器--pronunciationphoneme_evaluatorpy)
    - [4.6 FastAPI 主服务 — `server.py`](#46-fastapi-主服务--serverpy)
    - [4.7 调试与测试工具](#47-调试与测试工具)
 5. [API 接口详解](#5-api-接口详解)
@@ -80,42 +83,73 @@ graph LR
 
 ```text
 MemoryServerTTS/
-├── main.py                         # 应用入口（封装 uvicorn 启动）
+├── main.py                         # 应用入口（uvicorn 启动，RELOAD 环境变量控制热重载）
 ├── requirements.txt                # Python 依赖清单
 ├── Dockerfile                      # Docker 容器化配置
 ├── README.md                       # 项目简介
-├── environment.yml                 # Conda 环境定义
-├── start_server."at  "             # Windows 一键启动
+├── "# environment.yml"             # Conda 环境定义（memory-tts）
+├── config/                         # 模块配置（YAML，TTSConfig/OCRConfig 读取）
+│   ├── tts.yaml                    # TTS 配置：模型/解码策略/校验闭环/词库缓存
+│   └── ocr.yaml                    # OCR 配置
+├── start_server.bat                # Windows 一键启动
 ├── start_server.sh                 # Linux/macOS 一键启动
 │
-├── src/                            # 核心源代码
-│   ├── __init__.py                 # 包标识
-│   ├── server.py                   # FastAPI 主服务（API 路由 + 生命周期管理）
-│   ├── model_loader.py             # TTS 模型管理器（Qwen3-TTS 单例）
-│   ├── asr_model_loader.py         # ASR 模型管理器（Faster-Whisper 单例）
-│   ├── pronunciation_evaluator.py  # MFCC+DTW 声学发音评价器
-│   ├── phoneme_evaluator.py        # G2P+ASR 音素级发音评价器（核心创新）
-│   ├── g2p_engine.py               # G2P 引擎（英文 g2p-en / 中文 pypinyin）
-│   ├── debug_ui.py                 # Gradio 调试界面
-│   └── test_official.py            # Qwen3-TTS 官方接口测试脚本
+├── src/                            # 核心源代码（按模块分包）
+│   ├── __init__.py
+│   ├── server.py                   # FastAPI 主服务（路由挂载 + 生命周期 + WebSocket）
+│   ├── common/                     # 公共组件
+│   │   ├── base_config.py          # 配置基类（YAML + 环境变量覆盖）
+│   │   └── logging.py              # 统一日志（[模块] 前缀 + ANSI 彩色）
+│   ├── tts/                        # TTS 模块（Qwen3-TTS）
+│   │   ├── config.py               # TTSConfig（解码参数/校验参数/词库缓存配置）
+│   │   ├── model_loader.py         # TTSModelManager（单例 + 1.7B/0.6B 降级 + 短长文本分治）
+│   │   ├── router.py               # /api/v1/tts/* 路由
+│   │   └── verifier.py             # ASR 回读校验（宽松匹配 + 置信度门槛）
+│   ├── asr/                        # ASR 模块（Faster-Whisper）
+│   │   ├── model_loader.py         # ASRModelManager（单例）
+│   │   └── router.py               # /api/v1/asr/* 路由
+│   ├── pronunciation/              # 发音评价模块
+│   │   ├── evaluator.py            # MFCC+DTW 声学评价器
+│   │   ├── phoneme_evaluator.py    # G2P+ASR 音素级评价器（核心创新）
+│   │   ├── g2p_engine.py           # G2P 引擎（英文 g2p-en / 中文 pypinyin）
+│   │   └── router.py               # /api/v1/pronunciation/* 路由
+│   ├── ocr/                        # OCR 模块（PaddleOCR）
+│   │   ├── config.py / engine.py / router.py
+│   ├── dictation/                  # 🔥 词库缓存（听写场景，Phase 2）
+│   │   ├── cache.py                # 缓存存储（key=hash(word|voice|lang|instruct|版本)，原子写入）
+│   │   ├── generator.py            # best-of-N 预生成 + quality_score 评分
+│   │   ├── spec.py                 # 词条规格归一化（语言别名 + 母语音色匹配）
+│   │   ├── router.py               # /api/v1/dictation/* 路由（含管理端接口）
+│   │   └── pregenerate.py          # 离线预生成 CLI（强制 1.7B）
+│   └── dashboard/                  # 管理后台
+│       ├── router.py               # /admin 页面路由
+│       └── templates/index.html    # 单页后台（系统概览/TTS/ASR/发音/OCR/词库管理/测速）
 │
 ├── models/                         # AI 模型文件
-│   ├── qwen-0.6b/                  # Qwen3-TTS 0.6B 轻量模型（~2-3 GB 显存）
-│   │   ├── config.json
-│   │   ├── model.safetensors
-│   │   ├── tokenizer_config.json
-│   │   ├── vocab.json / merges.txt
+│   ├── qwen-1.7b/                  # Qwen3-TTS 1.7B 主模型（推荐，~3.4GB VRAM）
+│   │   ├── config.json / generation_config.json / model.safetensors
+│   │   ├── tokenizer_config.json / vocab.json / merges.txt
 │   │   └── speech_tokenizer/       # 语音分词器子模型
-│   └── qwen-1.7b/                  # Qwen3-TTS 1.7B 高质量模型（~4-6 GB 显存）
+│   └── qwen-0.6b/                  # Qwen3-TTS 0.6B 降级模型（~1.2GB VRAM，不支持 instruct）
 │       └── ...（结构同上）
 │
+├── tests/                          # 单元测试（unittest，python -m unittest discover -s tests）
+│   ├── test_tts_verifier.py        # ASR 校验匹配逻辑（19 用例）
+│   ├── test_dictation_cache.py     # 词库缓存/评分/择优（21 用例）
+│   ├── test_tts_model_loader.py    # 单词语音判定 is_single_word（10 用例）
+│   └── test_official.py            # Qwen3-TTS 官方接口测试脚本
+│
+├── tts-audio/                      # 流式/合成输出音频（/tts-audio 静态挂载）
+├── word-cache/                     # 🔥 词库音频缓存（运行时生成，/api/v1/dictation 使用）
 ├── voices/                         # 音色克隆数据目录（运行时生成）
 │
 └── docs/                           # 文档目录
-    ├── API_DOCUMENTATION.md              # API 集成文档（面向 SpringBoot 开发者）
-    ├── PROJECT_DOCUMENTATION.md          # 本项目完整技术文档
-    ├── phoneme-score-fix.md              # 音素评分接口修复记录
-    └── TROUBLESHOOTING_SPRINGBOOT.md     # S(ringBoot 接入排错指南)
+    ├── API_DOCUMENTATION.md        # API 集成文档（面向调用方/SpringBoot 开发者）
+    ├── PROJECT_DOCUMENTATION.md    # 本项目完整技术文档（本文件）
+    ├── CONSTRAINTS.md              # 🔥 约束与约定文档（架构/模型/接口/性能边界，必读）
+    ├── OCR_INTEGRATION.md          # OCR 模块接入说明
+    ├── phoneme-score-fix.md        # 音素评分接口修复记录
+    └── TROUBLESHOOTING_SPRINGBOOT.md  # SpringBoot 接入排错指南
 ```
 
 ---
@@ -250,15 +284,16 @@ sequenceDiagram
 
 ## 4. 模块详解
 
-### 4.1 TTS 模型管理器 — `model_loader.py`
+### 4.1 TTS 模型管理器 — `src/tts/model_loader.py`
 
 #### 设计思路
 
-TTS 模型管理器是整个语音合成能力的核心。设计上遵循三个原则：
+TTS 模型管理器是整个语音合成能力的核心。设计上遵循四个原则：
 
-1. **单例模式**：Qwen3-TTS 模型加载到 GPU 显存后，每个实例占用 2-6 GB 显存，加载耗时 20-60 秒。单例确保全局只有一个模型实例，避免显存爆炸和重复加载。
-2. **自动降级**：优先加载 0.6B 轻量模型（内存友好），失败后自动切换到 1.7B 高质量模型，提高服务可用性。
+1. **单例模式**：Qwen3-TTS 模型加载到 GPU 显存后，每个实例占用 1-4 GB 显存，加载耗时 20-60 秒。单例确保全局只有一个模型实例，避免显存爆炸和重复加载。
+2. **主备降级（1.7B 优先）**：默认加载 **1.7B 主模型**（质量好、支持 `instruct`），本地缺失或加载失败时降级到 **0.6B 备选模型**（轻量，但不支持 `instruct`）。⚠️ 注意：早期版本为"0.6B 优先"，2026-08 已反转。
 3. **计算精度自适应**：根据 GPU 架构自动选择 `bfloat16`（Ampere SM 8.0+，如 RTX 30xx/A100/H100）或 `float32`（旧架构/CPU）。
+4. **短/长文本分治**（2026-08 起）：单词语音走"确定性解码 + ASR 校验闭环"，短句/长文本走"随机采样 + 轻量时长校验"，详见 4.1.1。
 
 #### 单例模式实现原理
 
@@ -266,44 +301,48 @@ TTS 模型管理器是整个语音合成能力的核心。设计上遵循三个�
 class TTSModelManager:
     _instance = None  # 类变量，保存唯一实例
 
-    def __new__(cls):
+    def __new__(cls, config=None):
         if cls._instance is None:           # 首次调用
             cls._instance = super().__new__(cls)  # 调用 object.__new__
+            cls._instance._config = config or TTSConfig()  # 注入配置
             cls._instance._load_model()     # 加载模型
         return cls._instance                # 后续调用直接返回已有实例
 ```
 
 **关键点**：Python 的 `__new__` 方法在 `__init__` 之前调用，负责创建实例。通过重写 `__new__` 实现单例，确保无论如何调用 `TTSModelManager()`，返回的都是同一个实例。
 
-#### 多级加载策略
+#### 主备加载策略（1.7B → 0.6B）
 
 ```mermaid
 flowchart TD
-    START["TTSModelManager() 被首次调用"] --> TRY0{"本地 0.6B 存在?<br/>models/qwen-0.6b/"}
-    TRY0 -->|是| LOAD0["加载本地 0.6B<br/>约 20-40 秒"]
-    TRY0 -->|否| TRY1{"HuggingFace 0.6B<br/>可访问?"}
-    TRY1 -->|是| LOAD1["下载+加载 0.6B<br/>约 1-3 分钟"]
-    TRY1 -->|否| FAIL0["0.6B 加载失败"]
-    
+    START["TTSModelManager() 被首次调用"] --> TRY0{"本地 1.7B 存在?<br/>models/qwen-1.7b/"}
+    TRY0 -->|是| LOAD0["加载本地 1.7B<br/>约 20-60 秒"]
+    TRY0 -->|否| TRY1{"HuggingFace 1.7B<br/>可访问?"}
+    TRY1 -->|是| LOAD1["下载+加载 1.7B<br/>约 2-5 分钟"]
+    TRY1 -->|否| FAIL0["1.7B 加载失败"]
+
     LOAD0 --> DONE["✅ 模型就绪"]
     LOAD1 --> DONE
-    
-    FAIL0 --> TRY2{"本地 1.7B 存在?<br/>models/qwen-1.7b/"}
-    TRY2 -->|是| LOAD2["加载本地 1.7B<br/>约 30-60 秒"]
-    TRY2 -->|否| TRY3{"HuggingFace 1.7B<br/>可访问?"}
-    TRY3 -->|是| LOAD3["下载+加载 1.7B<br/>约 2-5 分钟"]
+
+    FAIL0 --> TRY2{"本地 0.6B 存在?<br/>models/qwen-0.6b/"}
+    TRY2 -->|是| LOAD2["加载本地 0.6B<br/>约 20-40 秒"]
+    TRY2 -->|否| TRY3{"HuggingFace 0.6B<br/>可访问?"}
+    TRY3 -->|是| LOAD3["下载+加载 0.6B<br/>约 1-3 分钟"]
     TRY3 -->|否| FAIL["❌ 所有模型加载失败<br/>抛出 RuntimeError"]
-    
+
     LOAD2 --> DONE
     LOAD3 --> DONE
 ```
 
-配置方式：可通过环境变量覆盖默认路径
+配置方式：可通过环境变量覆盖默认路径（`config/tts.yaml` 的 `tts.model_path` 亦生效）
 
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|------|
-| `QWEN_TTS_MODEL_PATH` | `./models/qwen-0.6b` | 主模型本地路径 |
-| `QWEN_TTS_MODEL` | `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice` | 主模型 HF ID |
+| `QWEN_TTS_MODEL_PATH` | `./models/qwen-1.7b`（或 yaml `tts.model_path`） | 主模型本地路径 |
+| `QWEN_TTS_MODEL` | `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` | 主模型 HF ID |
+| `TTSCONF_MODEL_PATH` | 同 `QWEN_TTS_MODEL_PATH` | TTSConfig 环境变量覆盖（词库 CLI 用它强制 1.7B） |
+
+> ⚠️ **0.6B 模型不支持 `instruct`**：qwen_tts 包会在 0.6B 上静默丢弃指令。听写词库预生成（`src/dictation/pregenerate.py`）通过 `TTSCONF_MODEL_PATH` **强制 1.7B**，规避该限制。
 
 #### GPU 精度自适应原理
 
@@ -318,6 +357,7 @@ compute_dtype = torch.bfloat16 if (use_gpu and supports_bf16) else torch.float32
 - **SM 9.0** = Hopper 架构（H100）
 - `bfloat16`（Brain Floating Point）是一种 16 位浮点格式，与 float32 有相同的指数范围（8 位），但尾数只有 7 位。相比 float16，bfloat16 不容易溢出/下溢，适合深度学习推理
 - 旧架构（如 GTX 10xx 的 SM 6.1、RTX 20xx 的 SM 7.5）不支持 bfloat16 硬件加速，回退到 float32
+- `torch.set_float32_matmul_precision('high')` 全局开启 TF32 加速（Ampere+，精度损失 <0.1%，速度提升 ~20%）
 
 #### 注意力实现选择
 
@@ -330,23 +370,39 @@ compute_dtype = torch.bfloat16 if (use_gpu and supports_bf16) else torch.float32
 #### 关键 API
 
 ```python
-def generate(self, text: str, voice: str = "Ryan", language: str = "English",
-             instructions: str = "", streaming: bool = False) -> tuple[list[np.ndarray], int]:
+def generate(self, text: str, voice: str = "", language: str = "",
+             instructions: str = "", streaming: bool = False,
+             verify: bool | None = None, seed: int | None = None
+             ) -> tuple[list[np.ndarray], int, dict]:
 ```
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `text` | str | — | 待合成文本 |
-| `voice` | str | `"Ryan"` | 音色 ID（如 `"Ono_Anna"`, `"aiden"`, `"vivian"`） |
-| `language` | str | `"English"` | 语言（`"Chinese"`, `"English"`, `"Japanese"`, `"Korean"` 等） |
-| `instructions` | str | `""` | 情感/风格指令，如 `"Speak with a happy tone"` |
-| `streaming` | bool | `False` | `True`=流式模式（`non_streaming_mode=False`） |
+| `voice` | str | `""` | 音色 ID；留空按语言自动匹配母语音色（English→aiden） |
+| `language` | str | `"English"` | 语言（`"Chinese"`, `"English"` 等，兼容 `en`/`zh` 简写） |
+| `instructions` | str | `""` | 情感/风格指令（**业务侧传入，服务端不注入**，见 CONSTRAINTS.md C1） |
+| `streaming` | bool | `False` | `True`=流式模式（不做校验） |
+| `verify` | bool\|None | `None` | `None`=自动（仅单词语音校验）；`true`=强制（仅单词语音生效）；`false`=跳过 ASR 校验 |
+| `seed` | int\|None | `None` | 基础随机种子（单词语音重试时 `seed+i`） |
 
-**返回值**：`(wavs_list, sample_rate)` — `wavs_list[0]` 是合成的音频 numpy 数组，`sample_rate` 是采样率。
+**返回值**：`(wavs, sample_rate, meta)` — `meta` 含 `verified / attempts / asr_text / confidence / duration / strategy(short|long) / seed / details`。
+
+#### 4.1.1 短/长文本分治与单词语音校验闭环（2026-08 起）
+
+`generate()` 依据 `is_single_word()`（`src/tts/model_loader.py`）判定输入类型：
+
+| 输入类型 | 判定 | 解码策略 | 校验 |
+|---------|------|---------|------|
+| 单词语音（`ahead`/`well`/`你好`） | 剥尾标点后 1 词、无内部空白、长度 ≤ 40 | 确定性：temp 0.5 / top_k 20 / top_p 0.9 / rep 1.2 / max_new 512 / 固定 seed | ASR 回读校验 + 换 seed 重试（≤3 次） |
+| 短句/多词短语（`How are you?` 等） | 非单词 | 随机采样（temp 0.9 / max_new 2048） | 轻量时长校验 + 重试 1 次 |
+| 长文本（>250 字符） | 非单词 | 分句后逐块随机采样 | 逐块轻量时长校验 |
+
+校验细节（宽松匹配 + 置信度门槛、失败降级语义）见 `docs/API_DOCUMENTATION.md` 4.4 节与 `docs/CONSTRAINTS.md` G 组约束。
 
 ---
 
-### 4.2 ASR 模型管理器 — `asr_model_loader.py`
+### 4.2 ASR 模型管理器 — `src/asr/model_loader.py`
 
 #### 设计思路
 
@@ -430,7 +486,7 @@ def transcribe(self, audio_path: str, language: str = "",
 
 ---
 
-### 4.3 发音评价器（MFCC+DTW）— `pronunciation_evaluator.py`
+### 4.3 发音评价器（MFCC+DTW）— `src/pronunciation/evaluator.py`
 
 #### 设计思路
 
@@ -516,7 +572,7 @@ $$score = \max\left(0, 100 - \frac{distance}{max\_distance} \times 100\right)$$
 
 ---
 
-### 4.4 G2P 引擎 — `g2p_engine.py`
+### 4.4 G2P 引擎 — `src/pronunciation/g2p_engine.py`
 
 #### 设计思路
 
@@ -621,7 +677,7 @@ def get_g2p_engine(language: str) -> G2PEngine:
 
 ---
 
-### 4.5 音素发音评价器 — `phoneme_evaluator.py`
+### 4.5 音素发音评价器 — `src/pronunciation/phoneme_evaluator.py`
 
 这是本项目的**核心创新模块**，也是发音评价的推荐方案。
 
@@ -802,22 +858,26 @@ Android 录音 → MemoryServer PronunciationService
 ```python
 @app.on_event("startup")
 async def startup_event():
-    app.state.model = TTSModelManager()              # 加载 TTS 模型 (~20-60s)
+    app.state.tts_config = TTSConfig()              # TTS 配置（解码/校验/词库缓存参数）
+    app.state.model = TTSModelManager(config=app.state.tts_config)   # 加载 TTS 模型 (~20-60s)
     app.state.asr_model = ASRModelManager()          # 加载 ASR 模型 (~5-10s)
     app.state.pronunciation_evaluator = PronunciationEvaluator()  # 初始化 MFCC 评价器
     app.state.phoneme_evaluator = PhonemeEvaluator(app.state.asr_model)  # 初始化音素评价器（注入 ASR 依赖）
+    app.state.ocr_engine = OCREngine(...)            # 初始化 OCR 引擎
 ```
 
-**启动顺序**：TTS（最耗时）→ ASR → 评价器。所有模型作为 `app.state` 属性存储，依赖注入到路由函数中。
+**启动顺序**：TTS（最耗时）→ ASR → 评价器 → OCR。所有模型作为 `app.state` 属性存储，依赖注入到路由函数中。
+
+**挂载的路由**：`tts` / `asr` / `pronunciation` / `ocr` / `dictation`（词库缓存）/ `dashboard`（管理后台），另挂载 `/tts-audio` 静态目录（`/stream` 与 `include_meta` 返回的 `audioUrl` 依赖它）。
 
 #### 并发控制：asyncio.Lock
 
 ```python
 app.state.model_lock = asyncio.Lock()
 
-# 所有 TTS 生成操作必须获取锁
+# 所有 TTS 生成操作必须获取锁（含词库生成/校验，见 CONSTRAINTS.md P1）
 async with app.state.model_lock:
-    wavs, sr = model.generate(...)
+    wavs, sr, meta = model.generate(...)
 ```
 
 **为什么需要锁？** Qwen3-TTS 模型的 `generate_custom_voice()` 方法不是线程安全/协程安全的。并发调用会导致 GPU 显存竞争，产生如下问题：
@@ -825,7 +885,7 @@ async with app.state.model_lock:
 - 显存溢出（OOM）
 - CUDA 错误
 
-`asyncio.Lock` 确保同一时刻只有一个 TTS 请求在 GPU 上推理，其他请求排队等待。由于 TTS 推理本身很快（通常 1-5 秒），锁的排队延迟在可接受范围内。
+`asyncio.Lock` 确保同一时刻只有一个 TTS 请求在 GPU 上推理，其他请求排队等待。由于 TTS 推理本身很快（通常 1-5 秒），锁的排队延迟在可接受范围内。**注意**：单词语音校验闭环（ASR 回读）也在锁内执行，听写请求延迟增加约 0.5-1.5s。
 
 #### 音频安全处理五步流程
 
@@ -880,31 +940,54 @@ def _snake_to_camel(data):
 
 ### 4.7 调试与测试工具
 
-#### Gradio 调试界面 (`debug_ui.py`)
+#### 管理后台（`/admin`）
 
-提供一个轻量级的 Web 界面，用于快速测试 TTS 效果：
+浏览器访问 `http://localhost:8000/admin`，集成各模块调试面板（单页 tab 结构）：
+
+- **系统概览**：GPU/显存状态、模型加载状态
+- **TTS 合成 / ASR 识别 / 发音评价 / OCR 扫描**：各模块功能调试与测速
+- 🔥 **词库管理**：听写词库缓存统计、批量预生成（任务进度轮询）、词条表格（试听 / 标记 bad / 重新生成）
+- **测速工作台**：TTS/ASR/OCR 响应延迟基准
+
+#### 单元测试（`tests/`）
 
 ```bash
-python src/debug_ui.py    # 运行在 http://0.0.0.0:7860
+# 全量测试（约 6 秒，无需 GPU）
+python -m unittest discover -s tests -p "test_*.py"
+
+# 单模块
+python -m unittest tests.test_tts_verifier tests.test_dictation_cache tests.test_tts_model_loader -v
 ```
 
-功能：文本输入 → 选择音色/语言/指令 → 点击生成 → 播放音频。
+| 测试文件 | 覆盖内容 |
+|---------|---------|
+| `test_tts_verifier.py` | ASR 校验宽松匹配（分词/前缀/编辑距离）、置信度门槛、语言映射 |
+| `test_dictation_cache.py` | 缓存 key 稳定性/区分度/配置变更失效、原子写入、bad 标记、评分与 best-of-N 择优 |
+| `test_tts_model_loader.py` | 单词语音判定 `is_single_word`（含短句排除） |
+| `test_official.py` | Qwen3-TTS 官方接口连通性（需 GPU + 模型） |
 
-**适用场景**：开发阶段快速验证 TTS 效果，不需要写 curl 或启动 MemoryServer。
-
-#### 官方测试脚本 (`test_official.py`)
+#### 官方测试脚本（`tests/test_official.py`）
 
 用于直接测试 Qwen3-TTS 官方 API，验证模型是否正确安装：
 
 ```bash
-python src/test_official.py
+python tests/test_official.py
 ```
 
 执行流程：
 1. 检查 CUDA 是否可用
 2. 加载 1.7B 模型（优先本地，回退 HuggingFace）
 3. 生成一句英文测试语音
-4. 保存为 `output_en.wav`
+4. 保存为 `test_emotion_output.wav`
+
+#### 词库预生成 CLI（`src/dictation/pregenerate.py`）
+
+```bash
+python -m src.dictation.pregenerate --words ahead,behind,cat
+python -m src.dictation.pregenerate --file words.csv --best-of 5
+```
+
+强制 1.7B、best-of-N 择优、ASR 校验后入库（详见 API 文档 4.5.3）。
 ---
 
 ## 5. API 接口详解
@@ -945,7 +1028,7 @@ python src/test_official.py
 ```json
 {
   "text": "Hello, welcome to Memory English Learning App!",
-  "voice": "Ono_Anna",
+  "voice": "aiden",
   "language": "English",
   "instructions": "Speak with a happy and encouraging tone.",
   "output_format": "wav"
@@ -955,10 +1038,13 @@ python src/test_official.py
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `text` | string | ✅ | — | 要合成的文本，支持中英文混合 |
-| `voice` | string | ❌ | `"Ono_Anna"` | 音色 ID（见下方音色表） |
-| `language` | string | ❌ | `"English"` | 语言：`"Chinese"`, `"English"`, `"Japanese"`, `"Korean"` 等 |
-| `instructions` | string | ❌ | `null` | 情感/风格指令，如 `"Speak sadly"`, `"Whisper softly"` |
+| `voice` | string | ❌ | `""`（自动） | 音色 ID（见下方音色表）；留空按语言自动匹配母语音色（English→aiden） |
+| `language` | string | ❌ | `"English"` | 语言：`"Chinese"`, `"English"`, `"Japanese"`, `"Korean"` 等，兼容 `en`/`zh` 简写 |
+| `instructions` | string | ❌ | `null` | 情感/风格指令，如 `"Speak sadly"`, `"Whisper softly"`（业务侧传入，服务端不注入） |
 | `output_format` | string | ❌ | `"wav"` | 输出格式，当前仅支持 `"wav"` |
+| `verify` | bool\|null | ❌ | `null` | `null`=自动（仅单词语音走 ASR 校验闭环）；`true`=强制（仅对单词语音生效）；`false`=跳过 ASR 校验 |
+| `seed` | int\|null | ❌ | `null` | 基础随机种子（单词语音重试时 `seed+i`） |
+| `include_meta` | bool | ❌ | `false` | `true` 返回 JSON（含 verified/attempts/asrText），否则返回 WAV 流（校验信息在 `X-TTS-*` 响应头） |
 
 **成功响应**：
 
@@ -966,6 +1052,7 @@ python src/test_official.py
 - Content-Type：`audio/wav`
 - 响应体：二进制 WAV 音频数据
 - 文件名：`tts_<32位hex>.wav`
+- 响应头：`X-TTS-Verified` / `X-TTS-Attempts` / `X-TTS-Strategy` / `X-TTS-Duration` / `X-TTS-Asr-Text` / `X-TTS-Asr-Confidence`
 
 **错误响应**：
 
@@ -973,21 +1060,21 @@ python src/test_official.py
 { "detail": "Only wav output is supported currently." }
 ```
 
-**音色速查表**：
+**音色速查表**（与模型 README 官方清单一致）：
 
-| 音色 ID | 语言 | 性别 | 风格描述 |
+| 音色 ID | 母语 | 性别 | 风格描述 |
 |---------|------|------|---------|
+| `ryan` | 英文 | 男 | 富有节奏感、动感 |
+| `aiden` | 英文 | 男 | 阳光、音色明亮 |
 | `vivian` | 中文 | 女 | 明亮、略带锋芒 |
 | `serena` | 中文 | 女 | 温暖、温柔 |
 | `uncle_fu` | 中文 | 男 | 低沉柔和，经验丰富 |
 | `dylan` | 中文（北京话） | 男 | 清晰自然 |
 | `eric` | 中文（四川话） | 男 | 活泼、沙哑明亮 |
-| `Ono_Anna` | 英文 | 男 | 充满活力、节奏感强 |
-| `aiden` | 英文 | 男 | 阳光、中音清晰 |
 | `ono_anna` | 日文 | 女 | 轻盈灵巧 |
 | `sohee` | 韩文 | 女 | 情感丰富 |
 
-> ⚠️ `Ono_Anna`（英文男声）与 `ono_anna`（日文女声）是大小写不同的两个独立音色。
+> ⚠️ 音色 ID 不区分大小写（模型侧自动归一）；官方建议使用音色**母语**生成以获得最佳质量。旧文档中的 "Ono_Anna 英文男声" 为错误标注——Ono_Anna 是**日语女声**。
 
 **SpringBoot 调用示例**：
 
@@ -995,7 +1082,7 @@ python src/test_official.py
 // 构建请求
 JSONObject body = new JSONObject();
 body.put("text", "Hello, how are you?");
-body.put("voice", "Ono_Anna");
+body.put("voice", "aiden");
 body.put("language", "English");
 body.put("instructions", "Speak cheerfully.");
 
@@ -1017,7 +1104,7 @@ Files.write(Paths.get("output.wav"), wavBytes);
 ```bash
 curl -X POST http://localhost:8000/api/v1/tts/synthesize \
   -H "Content-Type: application/json" \
-  -d '"'"'{"text":"Hello world","voice":"Ono_Anna","language":"English"}'"'"' \
+  -d '"'"'{"text":"Hello world","voice":"aiden","language":"English"}'"'"' \
   --output output.wav
 ```
 
@@ -1035,7 +1122,7 @@ curl -X POST http://localhost:8000/api/v1/tts/synthesize \
 {
   "type": "text_chunk",
   "data": "Hello, welcome to Memory English Learning App!",
-  "voice": "Ono_Anna",
+  "voice": "aiden",
   "language": "English",
   "instructions": "Speak with a happy tone."
 }
@@ -1045,7 +1132,7 @@ curl -X POST http://localhost:8000/api/v1/tts/synthesize \
 |------|------|------|------|
 | `type` | string | ✅ | 固定为 `"text_chunk"` |
 | `data` | string | ✅ | 待合成文本片段 |
-| `voice` | string | ❌ | 音色 ID，默认 `"Ono_Anna"` |
+| `voice` | string | ❌ | 音色 ID，默认 `"aiden"`（英文） |
 | `language` | string | ❌ | 语言，默认 `"English"` |
 | `instructions` | string | ❌ | 情感指令 |
 
@@ -1352,15 +1439,20 @@ graph TB
 
 ### 6.2 TTS 音频生命周期
 
-MemoryServer 通过调用 MemoryServerTTS 的 `/tts/synthesize` 接口获取音频，然后管理两类音频的生命周期：
+MemoryServer 通过调用 MemoryServerTTS 的 TTS 接口获取音频，然后管理两类音频的生命周期：
 
 | 音频类型 | TTS 端点 | MemoryServer 存储 | 生命周期 |
 |---------|---------|-------------------|---------|
 | 会话音频（AI 对话 TTS） | `/tts/synthesize` | `tts-audio/` 根目录 | 定时清理（默认 7 天） |
-| 单词音频（学习/听写） | `/tts/synthesize` | `tts-audio/words/` | 永久保留，按 `单词.wav` 复用 |
+| 单词音频（学习/听写） | 🔥 `/api/v1/dictation/audio` | `word-cache/`（服务端缓存） | 永久保留，命中零生成；由管理员预生成/标记 bad/重生成 |
 | 听写语境音频 | `/tts/synthesize` | `dictation_audio_cache` 表 | 30 天未访问即清理 |
 
-> **单词音频复用**：`TTSService.textToSpeechForWord(text, word)` 方法会先检查 `tts-audio/words/{word}.wav` 是否存在——存在则直接返回已有 URL，实现零成本复用。
+> **单词音频复用（2026-08 起）**：听写单词音频改由 MemoryServerTTS 侧词库缓存提供——
+> `GET /api/v1/dictation/audio?word=ahead&voice=...&language=...&instruct=...`。
+> 缓存 key = hash(单词|音色|语言|instruct|gen_config_version)，命中直接返回（零生成延迟）；
+> 未命中自动生成并回填；管理员通过 `/admin` "词库管理"页或 CLI（`python -m src.dictation.pregenerate`）预生成/试听/标记 bad/重生成。
+> 旧方案（客户端自管 `tts-audio/words/{word}.wav`）仍可用，但不再推荐——服务端缓存自带 ASR 校验闭环与版本换代。
+> `instruct` 由业务侧传入并参与缓存 key：不同情绪指令 = 不同音频条目，互不污染。
 
 ### 6.3 AI 对话中的语音链路
 
@@ -1430,40 +1522,65 @@ sequenceDiagram
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
-| `QWEN_TTS_MODEL_PATH` | `./models/qwen-0.6b` | 主 TTS 模型本地路径 |
-| `QWEN_TTS_MODEL` | `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice` | 主 TTS 模型 HF ID |
+| `QWEN_TTS_MODEL_PATH` | `./models/qwen-1.7b` | 主 TTS 模型本地路径（1.7B） |
+| `QWEN_TTS_MODEL` | `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` | 主 TTS 模型 HF ID |
+| `TTSCONF_MODEL_PATH` | 同 `QWEN_TTS_MODEL_PATH` | TTSConfig 环境变量覆盖（词库 CLI 用它强制 1.7B） |
 | `WHISPER_MODEL_SIZE` | `base` | Faster-Whisper 模型大小 |
 | `RELOAD` | `0` | 是否启用热重载（`1`/`true` 启用） |
+| `LOG_LEVEL` | `INFO` | 日志级别（`DEBUG`/`INFO`/`WARN`/`ERROR`） |
 | `HF_HUB_DISABLE_SSL_VERIFY` | （未设置） | 禁用 SSL 验证（内网环境用） |
+
+> TTSConfig 支持 `TTSCONF_<KEY>` 形式的环境变量覆盖任意 yaml 配置项（`env_prefix = "TTSCONF_"`）。
 
 ### 7.2 模型路径配置
 
 ```
 models/
-├── qwen-0.6b/           # 默认主模型（~2-3 GB 显存）
+├── qwen-1.7b/           # 主模型（默认，~3.4 GB 显存，支持 instruct）
 │   ├── model.safetensors      # 模型权重
+│   ├── config.json / generation_config.json  # 模型/生成配置
 │   ├── tokenizer_config.json  # 分词器配置
 │   ├── vocab.json + merges.txt # 词表
 │   └── speech_tokenizer/      # 语音分词器
 │
-└── qwen-1.7b/           # 降级备选模型（~4-6 GB 显存）
+└── qwen-0.6b/           # 降级备选模型（~1.2 GB 显存，不支持 instruct）
     └── ...（结构同上）
 ```
 
-### 7.3 模型加载策略
+### 7.3 模型加载策略（1.7B 优先）
 
 ```mermaid
 flowchart LR
-    A["启动"] --> B{"本地 0.6B?"}
-    B -->|是| C["加载 0.6B ✅"]
-    B -->|否| D{"HF 0.6B?"}
+    A["启动"] --> B{"本地 1.7B?"}
+    B -->|是| C["加载 1.7B ✅"]
+    B -->|否| D{"HF 1.7B?"}
     D -->|是| C
-    D -->|否| E{"本地 1.7B?"}
-    E -->|是| F["加载 1.7B ✅"]
-    E -->|否| G{"HF 1.7B?"}
+    D -->|否| E{"本地 0.6B?"}
+    E -->|是| F["加载 0.6B ✅（丢 instruct）"]
+    E -->|否| G{"HF 0.6B?"}
     G -->|是| F
     G -->|否| H["❌ 启动失败"]
 ```
+
+### 7.4 config/tts.yaml 关键配置
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `tts.model_path` / `tts.fallback_model_path` | `./models/qwen-1.7b` / `./models/qwen-0.6b` | 主/备模型路径 |
+| `tts.engine` | `sdpa` | 注意力实现（`sdpa` \| `flash_attention_2`） |
+| `tts.dtype` | `bfloat16` | 计算精度 |
+| `tts.default_voice` / `tts.default_language` | `aiden` / `English` | 兜底音色/语言（voice 留空时按语言自动匹配母语音色） |
+| `tts.performance.compile` | `false` | torch.compile 优化（首次编译 2-5 分钟） |
+| `tts.text.verify_text_threshold` | `40` | `is_single_word` 单词长度兜底上限 |
+| `tts.decoding.short` | temp 0.5 / top_k 20 / rep 1.2 / max_new 512 / seed 42 | 单词语音确定性解码参数 |
+| `tts.decoding.long` | temp 0.9 / max_new 2048 | 短句/长文本随机采样参数 |
+| `tts.verification.max_retries` | `3` | 单词语音 ASR 校验最大重试（换 seed） |
+| `tts.verification.asr_confidence_threshold` | `-1.0` | ASR 置信度门槛 |
+| `tts.verification.word_max_duration_s` | `5.0` | 单词音频时长上限 |
+| `tts.dictation.cache_dir` | `word-cache` | 词库缓存目录 |
+| `tts.dictation.best_of` / `seed_base` | `3` / `1000` | 预生成候选数与 seed 起点 |
+
+> 修改 `decoding.*` / `verification.*` / `model_path` 会自动改变 `gen_config_version`，词库缓存条目随之失效换代（见 CONSTRAINTS.md D2）。
 
 ---
 
@@ -1537,7 +1654,7 @@ curl http://localhost:8000/api/v1/tts/voices
 # TTS 合成测试
 curl -X POST http://localhost:8000/api/v1/tts/synthesize \
   -H "Content-Type: application/json" \
-  -d '"'"'{"text":"Hello world","voice":"Ono_Anna","language":"English"}'"'"' \
+  -d '"'"'{"text":"Hello world","voice":"aiden","language":"English"}'"'"' \
   --output test.wav
 
 # ASR 转录测试
@@ -1551,11 +1668,9 @@ curl -X POST http://localhost:8000/api/v1/pronunciation/phoneme-score \
   -F "language=en"
 ```
 
-### 9.2 Gradio 调试 UI
+### 9.2 管理后台
 
-```bash
-python src/debug_ui.py    # 浏览器打开 http://localhost:7860
-```
+浏览器访问 `http://localhost:8000/admin` 打开调试面板（含词库管理，见 4.7 节）。旧版 Gradio 调试界面（`debug_ui.py`）已移除。
 
 ### 9.3 FastAPI 自动文档
 
@@ -1568,6 +1683,7 @@ python src/debug_ui.py    # 浏览器打开 http://localhost:7860
 - **命名**：Python 使用 `snake_case`，API 输出支持 camelCase 转换
 - **类型注解**：所有函数参数和返回值均使用类型注解
 - **错误处理**：`HTTPException` 返回统一格式 `{"detail": "..."}`
+- 🔥 **架构约束**：TTS 服务端不注入情绪指令、单词语音判定规则、缓存换代机制、模型锁并发边界等**必须遵守的约束**见 `docs/CONSTRAINTS.md`（修改相关代码前必读）
 
 ---
 
@@ -1640,17 +1756,19 @@ kill -9 <PID>
 
 ## 附录 A：音色完整速查表
 
-| 音色 ID | 名称 | 语言 | 性别 | 风格描述 | 类型 |
+| 音色 ID | 名称 | 母语 | 性别 | 风格描述 | 类型 |
 |---------|------|------|------|---------|------|
+| `ryan` | Ryan | 英文 | 男 | 富有节奏感的动感男声 | preset |
+| `aiden` | Aiden | 英文 | 男 | 阳光美式男声，音色明亮 | preset |
 | `vivian` | Vivian | 中文 | 女 | 明亮、略带锋芒的年轻女性声音 | preset |
 | `serena` | Serena | 中文 | 女 | 温暖、温柔的年轻女性声音 | preset |
 | `uncle_fu` | Uncle_Fu | 中文 | 男 | 经验丰富的男性嗓音，低沉柔和 | preset |
 | `dylan` | Dylan | 中文（北京话） | 男 | 年轻北京男性，清晰自然 | preset |
 | `eric` | Eric | 中文（四川话） | 男 | 活泼成都男声，沙哑明亮 | preset |
-| `Ono_Anna` | Ono_Anna | 英文 | 男 | 充满活力，节奏感强劲 | preset |
-| `aiden` | Aiden | 英文 | 男 | 阳光美国男声，中音清晰 | preset |
 | `ono_anna` | Ono_Anna | 日文 | 女 | 活泼日本女性，轻盈灵巧 | preset |
 | `sohee` | Sohee | 韩文 | 女 | 温暖韩国女性，情感丰富 | preset |
+
+> 与模型 README 官方清单一致；`voice` 留空时按 `language` 自动匹配母语音色（English→aiden、Chinese→vivian、Japanese→ono_anna、Korean→sohee）。
 
 ## 附录 B：发音评分等级对照
 

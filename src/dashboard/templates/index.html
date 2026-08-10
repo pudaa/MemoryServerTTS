@@ -454,6 +454,23 @@ body {
 .btn-lg { padding: 12px 26px; font-size: 15px; border-radius: var(--radius); }
 .btn-group { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
+/* 词库管理表格 */
+.dict-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dict-table th, .dict-table td {
+  text-align: left; padding: 8px 10px;
+  border-bottom: 1px solid var(--border-tertiary); vertical-align: middle;
+}
+.dict-table th { color: var(--text-secondary); font-weight: 500; white-space: nowrap; }
+.dict-table td { color: var(--text-primary); }
+.dict-table audio { height: 32px; max-width: 220px; }
+.dict-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  font-size: 11px; line-height: 18px;
+}
+.dict-badge.ok { background: var(--green-soft, #eaf3de); color: var(--green, #3b6d11); }
+.dict-badge.bad { background: var(--red-soft, #fcebeb); color: var(--red, #a32d2d); }
+.dict-badge.warn { background: var(--amber-soft, #faeeda); color: var(--amber, #854f0b); }
+
 /* ═══════════════════════════════════════════════
    Form Elements
    ═══════════════════════════════════════════════ */
@@ -817,6 +834,7 @@ code, .code {
     <div class="nav-section">学习工具</div>
     <a href="#pron" data-tab="pron"><i class="fas fa-spell-check"></i>发音评价</a>
     <a href="#ocr" data-tab="ocr"><i class="fas fa-image"></i>OCR 扫描</a>
+    <a href="#dict" data-tab="dict"><i class="fas fa-book-open"></i>词库管理</a>
 
     <div class="nav-section">工具</div>
     <a href="#bench" data-tab="bench"><i class="fas fa-gauge-high"></i>测速工作台</a>
@@ -894,8 +912,8 @@ code, .code {
       <div class="form-group">
         <label class="form-label">音色</label>
         <select id="tts-voice">
-          <option value="Ono_Anna">Ono_Anna — English (充满活力的男声)</option>
-          <option value="aiden">Aiden — English (阳光美式男声)</option>
+          <option value="ryan">Ryan — English (动感男声)</option>
+          <option value="aiden" selected>Aiden — English (阳光美式男声)</option>
           <option value="vivian">Vivian — 中文 (明亮女声)</option>
           <option value="serena">Serena — 中文 (温柔女声)</option>
           <option value="uncle_fu">Uncle_Fu — 中文 (成熟男声)</option>
@@ -1060,6 +1078,45 @@ code, .code {
   </div>
 </div>
 
+<div id="tab-dict" class="tab-content">
+  <div class="page-header">
+    <h1><i class="fas fa-book-open text-accent"></i> 词库管理</h1>
+    <p class="desc">听写词库缓存（/api/v1/dictation）：试听、标记 bad、重新生成、批量预生成</p>
+  </div>
+
+  <div class="card" id="dict-summary-card">
+    <div class="card-header">
+      <h3><i class="fas fa-chart-simple"></i>缓存统计</h3>
+      <button class="btn btn-secondary btn-sm" onclick="loadDictWords()"><i class="fas fa-refresh"></i>刷新</button>
+    </div>
+    <div id="dict-summary" class="mt-12">加载中…</div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3><i class="fas fa-layer-group"></i>批量预生成</h3></div>
+    <div class="form-group">
+      <label class="form-label">词表（一行一个单词，或 CSV：word,voice,language,instruct；# 开头为注释）</label>
+      <textarea id="dict-words" rows="4" placeholder="ahead&#10;behind,aiden,English,Speak in a calm tone&#10;cat"></textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">候选数 best-of</label>
+        <input type="number" id="dict-best-of" value="3" min="1" max="8">
+      </div>
+    </div>
+    <div class="btn-group mt-12">
+      <button class="btn btn-primary" onclick="dictPregenerate()"><i class="fas fa-play"></i>开始预生成</button>
+      <span class="text-dim">大批量建议用 CLI：python -m src.dictation.pregenerate --file words.txt</span>
+    </div>
+    <div id="dict-task" class="mt-12"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3><i class="fas fa-list"></i>缓存词条</h3></div>
+    <div id="dict-list" class="mt-12">加载中…</div>
+  </div>
+</div>
+
 </div><!-- .content -->
 </div><!-- .main -->
 
@@ -1139,7 +1196,8 @@ var tabTitles = {
   asr: 'ASR 识别',
   pron: '发音评价',
   ocr: 'OCR 扫描',
-  bench: '测速工作台'
+  bench: '测速工作台',
+  dict: '词库管理'
 };
 
 document.querySelectorAll('.sidebar-nav a').forEach(function(a) {
@@ -1597,7 +1655,7 @@ function runBenchmark() {
       p = fetch('/api/v1/tts/synthesize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: 'Hello. This is a speed benchmark test.', voice: 'Ono_Anna', language: 'English' })
+        body: JSON.stringify({ text: 'Hello. This is a speed benchmark test.', voice: 'aiden', language: 'English' })
       }).then(function(r) { if (!r.ok) throw new Error('fail'); return r.blob(); });
     } else if (mod === 'asr') {
       p = API.get('/health');
@@ -1641,6 +1699,127 @@ document.addEventListener('keydown', function(e) {
     }
   }
 });
+// ═══════════════════════════════════════════════
+//  Dictation 词库管理（听写场景缓存）
+// ═══════════════════════════════════════════════
+function dictAudioUrl(entry) {
+  return '/api/v1/dictation/audio?word=' + encodeURIComponent(entry.word) +
+    '&voice=' + encodeURIComponent(entry.voice || '') +
+    '&language=' + encodeURIComponent(entry.language || 'English') +
+    '&instruct=' + encodeURIComponent(entry.instruct || '');
+}
+
+function loadDictWords() {
+  API.get('/dictation/words').then(function(data) {
+    var s = data.summary || {};
+    document.getElementById('dict-summary').innerHTML =
+      '总数 <b>' + s.total + '</b> &nbsp;·&nbsp; 已校验 <b>' + s.verified + '</b>' +
+      ' &nbsp;·&nbsp; 未通过 <b>' + s.unverified + '</b>' +
+      ' &nbsp;·&nbsp; 标记bad <b style="color:var(--red)">' + s.bad + '</b>';
+    var entries = data.entries || [];
+    if (!entries.length) {
+      document.getElementById('dict-list').innerHTML =
+        '<div class="text-dim">暂无缓存词条。可先用上方批量预生成，或由听写模块首次请求时自动生成回填。</div>';
+      return;
+    }
+    var html = '<div style="overflow-x:auto"><table class="dict-table"><thead><tr>' +
+      '<th>单词</th><th>音色</th><th>语言</th><th>指令</th><th>质量分</th><th>时长</th>' +
+      '<th>状态</th><th>命中</th><th>生成时间</th><th>试听</th><th>操作</th></tr></thead><tbody>';
+    entries.forEach(function(e) {
+      var bad = (e.bad_flags || []).length > 0;
+      var verified = e.verified ? '<span class="dict-badge ok">已校验</span>' : '<span class="dict-badge warn">未校验</span>';
+      var badge = bad ? '<span class="dict-badge bad">bad: ' + (e.bad_reason || '') + '</span>' : '';
+      var score = (e.quality_score != null) ? e.quality_score.toFixed(3) : '-';
+      var dur = (e.duration != null) ? e.duration.toFixed(2) + 's' : '-';
+      var instruct = e.instruct
+        ? '<span title="' + e.instruct.replace(/"/g, '&quot;') + '">' + e.instruct.slice(0, 16) + '…</span>'
+        : '<span class="text-dim">—</span>';
+      var audio = '<audio controls preload="none" src="' + dictAudioUrl(e) + '"></audio>';
+      var actions =
+        '<button class="btn btn-primary btn-sm" onclick="dictRegenerate(\'' + e.key + '\')">重生成</button> ' +
+        '<button class="btn btn-danger btn-sm" onclick="dictMarkBad(\'' + e.key + '\')">标 bad</button>';
+      html += '<tr><td><b>' + e.word + '</b></td><td>' + (e.voice || '-') + '</td><td>' + (e.language || '-') + '</td>' +
+        '<td>' + instruct + '</td><td>' + score + '</td><td>' + dur + '</td>' +
+        '<td>' + verified + ' ' + badge + '</td><td>' + (e.served_count || 0) + '</td>' +
+        '<td class="text-dim">' + (e.generated_at || '-') + '</td><td>' + audio + '</td><td>' + actions + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    document.getElementById('dict-list').innerHTML = html;
+  }).catch(function(e) {
+    document.getElementById('dict-list').innerHTML = '<div class="result-box" style="color:var(--red)">❌ ' + e.message + '</div>';
+  });
+}
+
+function dictRegenerate(key) {
+  if (!confirm('确认重新生成该词条？将用 best-of-N + ASR 校验重新生成并择优替换。')) return;
+  API.post('/dictation/words/' + encodeURIComponent(key) + '/regenerate', {}).then(function() {
+    toast('重新生成完成', 'success');
+    loadDictWords();
+  }).catch(function(e) { toast('失败: ' + e.message, 'error'); });
+}
+
+function dictMarkBad(key) {
+  var reason = prompt('标记原因（emotion / noise / wrong_pronunciation / unclear / 其他）:', 'emotion');
+  if (!reason) return;
+  API.post('/dictation/feedback', { key: key, reason: reason }).then(function(r) {
+    toast('已标记 bad，后台正在重生成 (task ' + r.taskId + ')', 'success');
+    if (r.taskId) pollDictTask(r.taskId, function() { loadDictWords(); });
+    else loadDictWords();
+  }).catch(function(e) { toast('失败: ' + e.message, 'error'); });
+}
+
+function dictPregenerate() {
+  var raw = document.getElementById('dict-words').value.trim();
+  if (!raw) { toast('请先输入词表', 'error'); return; }
+  var words = [];
+  raw.split(/\n/).forEach(function(line) {
+    line = line.trim();
+    if (!line || line.startsWith('#')) return;
+    var parts = line.split(',').map(function(x) { return x.trim(); });
+    words.push({ word: parts[0], voice: parts[1] || '', language: parts[2] || 'English', instruct: parts[3] || null });
+  });
+  if (!words.length) { toast('词表为空', 'error'); return; }
+  var bestOf = parseInt(document.getElementById('dict-best-of').value, 10) || 3;
+  var btn = document.querySelector('#tab-dict .btn-primary');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>预生成中…'; }
+  API.post('/dictation/pregenerate', { words: words, best_of: bestOf }).then(function(r) {
+    document.getElementById('dict-task').innerHTML = '任务 ' + r.taskId + ' 已启动，共 ' + r.total + ' 个词…';
+    pollDictTask(r.taskId, function() {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-play"></i>开始预生成'; }
+      loadDictWords();
+    });
+  }).catch(function(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-play"></i>开始预生成'; }
+    toast('启动失败: ' + e.message, 'error');
+  });
+}
+
+function pollDictTask(taskId, done) {
+  var tick = function() {
+    API.get('/dictation/tasks/' + taskId).then(function(t) {
+      var el = document.getElementById('dict-task');
+      if (!el) return;
+      var ok = 0, failed = 0;
+      Object.keys(t.results || {}).forEach(function(w) {
+        if (t.results[w].status === 'ok') ok++; else failed++;
+      });
+      el.innerHTML = '任务 ' + taskId + '：' + t.done + '/' + t.total +
+        '（成功 ' + ok + '，失败 ' + failed + '）当前: ' + (t.current || '-');
+      if (t.status === 'done' || t.status === 'failed' || t.status === 'error') {
+        if (failed > 0) {
+          el.innerHTML += '<div style="color:var(--red);margin-top:6px">有 ' + failed + ' 个词失败，详见服务端日志或改用 CLI 预生成。</div>';
+        }
+        if (done) done();
+      } else {
+        setTimeout(tick, 2000);
+      }
+    }).catch(function() { setTimeout(tick, 3000); });
+  };
+  tick();
+}
+
+document.querySelector('[data-tab="dict"]').addEventListener('click', function() { loadDictWords(); });
+
 </script>
 </body>
 </html>
