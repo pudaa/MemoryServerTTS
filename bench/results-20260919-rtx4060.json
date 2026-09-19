@@ -1,0 +1,135 @@
+{
+  "measured_at": "2026-09-19",
+  "host": {
+    "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "vram_total_mib": 8188,
+    "driver": "610.47",
+    "cuda_umd": "13.3",
+    "power_cap_w": 115,
+    "note": "WDDM; ~330-375 MiB baseline VRAM used by MuMu emulator (unrelated)"
+  },
+  "software": {
+    "os": "Windows",
+    "conda_env": "memory-tts",
+    "python": "3.12.13",
+    "torch": "2.7.0+cu128",
+    "transformers": "4.57.3",
+    "qwen-tts": "0.1.1",
+    "faster-whisper": "1.2.1",
+    "onnxruntime-gpu": "1.21.0",
+    "numpy": "2.3.5",
+    "accelerate": "1.12.0"
+  },
+  "inference_settings": {
+    "dtype": "bfloat16",
+    "attn_implementation": "sdpa",
+    "device_map": "cuda:0",
+    "non_streaming_mode": true,
+    "temperature": 0.9,
+    "top_k": 50,
+    "top_p": 1.0,
+    "repetition_penalty": 1.05,
+    "max_new_tokens": 2048,
+    "torch.set_float32_matmul_precision": "high",
+    "torch_compile": false
+  },
+  "text": "Hello. This is a speed benchmark test.",
+  "speaker": "aiden",
+  "language": "English",
+  "rtf_convention": "RTF = wall_seconds / audio_seconds (RTF > 1 means slower than real time)",
+  "results": [
+    {
+      "model": "qwen-1.7b",
+      "run": 1,
+      "audio_seconds": 3.12,
+      "frames": 39,
+      "stage1_ar_seconds": 19.242,
+      "stage2_codec_seconds": 0.664,
+      "total_seconds": 19.906,
+      "rtf_total": 6.38,
+      "ar_share_percent": 97,
+      "vram_allocated_mib": 3993,
+      "vram_peak_mib": 4085,
+      "vram_reserved_mib": 4130
+    },
+    {
+      "model": "qwen-1.7b",
+      "run": 2,
+      "audio_seconds": 2.72,
+      "frames": 34,
+      "stage1_ar_seconds": 16.223,
+      "stage2_codec_seconds": 0.112,
+      "total_seconds": 16.335,
+      "rtf_total": 6.01,
+      "ar_share_percent": 99,
+      "vram_allocated_mib": 3993,
+      "vram_peak_mib": 4073,
+      "vram_reserved_mib": 4130
+    },
+    {
+      "model": "qwen-0.6b",
+      "run": 1,
+      "audio_seconds": 3.12,
+      "frames": 39,
+      "stage1_ar_seconds": 15.342,
+      "stage2_codec_seconds": 0.627,
+      "total_seconds": 15.970,
+      "rtf_total": 5.12,
+      "ar_share_percent": 96,
+      "vram_allocated_mib": 2065,
+      "vram_peak_mib": 2157,
+      "vram_reserved_mib": 2198
+    },
+    {
+      "model": "qwen-0.6b",
+      "run": 2,
+      "audio_seconds": 3.28,
+      "frames": 41,
+      "stage1_ar_seconds": 15.092,
+      "stage2_codec_seconds": 0.100,
+      "total_seconds": 15.192,
+      "rtf_total": 4.63,
+      "ar_share_percent": 99,
+      "vram_allocated_mib": 2065,
+      "vram_peak_mib": 2162,
+      "vram_reserved_mib": 2200
+    }
+  ],
+  "load_seconds": {
+    "qwen-1.7b": 21.9,
+    "qwen-0.6b": 23.1,
+    "note": "from_pretrained, cold page cache; VRAM after load: 1.7B=4112 MiB reserved, 0.6B=2184 MiB reserved"
+  },
+  "model_architecture": {
+    "num_code_groups": 16,
+    "talker_layers": 28,
+    "talker_hidden": 2048,
+    "code_predictor_layers": 5,
+    "code_predictor_hidden": 1024,
+    "code_predictor_vocab": 2048,
+    "frame_rate_hz": 13,
+    "note_0.6b": "code_predictor is IDENTICAL to 1.7B (5 layers, hidden 1024, 16 groups); only the talker shrinks (hidden 2048->1024)",
+    "cost_per_frame": "1 talker forward + 15 sequential code_predictor forwards; a 39-frame sentence = ~40 talker + ~585 predictor forwards, all serial"
+  },
+  "environment_defect_found": {
+    "symptom": "import qwen_tts hangs indefinitely (>420s, killed)",
+    "trace": "librosa.core.notation -> numba @jit(cache=True) -> numba.core.caching.ensure_cache_path -> tempfile._mkstemp_inner",
+    "cause": "numba default JIT cache dir not writable in the DSH workspace-write sandbox; numba blocks instead of raising",
+    "fix": "set NUMBA_CACHE_DIR to a writable directory",
+    "measured": {
+      "without_numba_cache_dir_seconds": ">420 (hang)",
+      "with_numba_cache_dir_seconds": 17.2
+    },
+    "service_risk": "if the service process cannot write numba's cache dir, startup hangs silently instead of erroring"
+  },
+  "independent_cross_check": {
+    "source": "https://github.com/andimarafioti/faster-qwen3-tts (README)",
+    "their_rtx_4060_windows_row": {
+      "convention": "audio/wall (inverse of ours)",
+      "0.6B": { "baseline_rtf": 0.23, "baseline_ttfa_ms": 2697, "cudagraph_rtf": 2.26, "cudagraph_ttfa_ms": 413 },
+      "1.7B": { "baseline_rtf": 0.23, "baseline_ttfa_ms": 2905, "cudagraph_rtf": 1.83, "cudagraph_ttfa_ms": 460 }
+    },
+    "conversion": "their baseline 0.23 audio/wall == our 4.35 wall/audio, same order as our measured 4.63-6.38 (we are somewhat slower: non-streaming + our max_new_tokens/decode settings + bf16 vs their setup)",
+    "agreement": "independent hardware-independent confirmation that the bottleneck is host/kernel-launch overhead, not GPU compute"
+  }
+}
