@@ -299,11 +299,92 @@ POST /api/v1/tts/synthesize-stream
 
 ---
 
-## 10. 下一步
+## 10. 下一步（完成情况）
 
-1. **Step 2（Java 透传）**：`TTSServiceImpl` 增加流式转发，
-   `StreamingResponseBody` 边读 Python 流边写客户端；保留现有整段路径作为降级。
-2. **Step 3（鉴权直连）**：短时票据或播放器注入 Authorization（解决 W3）。
-3. **Step 4（Android）**：引入 ExoPlayer 播 `audio/L16` PCM（解决 W4）。
-4. **启动预热流式路径**（§9.3 第 2 点）。
-5. **音频管理**（§6）：流式后不再落盘整段 wav，需重新定义音频保留策略。
+1. **Step 2（Java 透传）**：`TTSServiceImpl` 边收边转发；保留整段路径作为降级。— ✅ 已完成并实测
+2. **Step 3（鉴权直连）**：— ✅ 由另一条线以
+   `MediaPlayer.setDataSource(context, uri, headers)` 直连 + token 刷新重试解决
+3. **Step 4（Android 播放）**：— ✅ 用 AudioTrack 播裸 PCM（未引入 ExoPlayer）
+4. **启动预热流式路径**（§9.3 第 2 点）。— ⏳ 未做
+5. **音频管理**（§6）：流式后不再落盘整段 wav。— ⏳ 仅客户端清理已由另一条线补齐
+
+---
+
+## 11. ★ 真机验收发现的缺陷与修复：停止后服务端不及时释放（2026-09-19）
+
+### 11.1 现象（真机反馈原文）
+
+> "当我停止后再播放，会有明显等待时间。我的怀疑是，我虽然『停止』了音频播放，
+> 但是流式生成仍在执行，因此我要等待流式生成结束后才能等到下一个流式生成任务开始执行。"
+
+### 11.2 复现与量化（`bench/measure_cancel_latency.py`）
+
+方法：发长文本请求 → 读 1 秒后**强制关闭连接**（等价于点"停止"）→ 立刻再发一个小请求，
+与基线 TTFA 对比。
+
+| 阶段 | 基线 TTFA | 取消后下一个请求 TTFA | 倍数 |
+|---|---|---|---|
+| 修复前 | 438 ms | **5 239 ms** | **11.97×** |
+| 修复后 | 484 ms | **2 399 ms** | **4.96×** |
+
+**用户的判断是对的**：客户端断开只停了播放，服务端仍在继续生成并持有
+`app.state.model_lock`，于是下一个请求必须排队。
+
+### 11.3 根因（与直觉不同，值得记录）
+
+不是"生成循环停不下来"，而是 **worker 线程阻塞在满队列上，永远看不到取消标志**：
+
+```
+客户端断开 → body() 生成器被取消 → finally 置 state["cancel"] = True
+worker: for wav, sr in generate_stream(...):
+            if state["cancel"]: break                 # ← 根本没机会执行
+            run_coroutine_threadsafe(q.put(...)).result()   # ← 卡死在这里
+```
+
+`q` 是 `asyncio.Queue(maxsize=8)`。客户端停止读取后，分片很快把队列填满，
+worker 阻塞在**无超时**的 `put()` 上；它既不检查 `cancel` 也不会退出，
+于是**一直占着锁直到 `th.join(timeout=5)` 超时**（约 5 秒）。
+
+日志佐证：长文本请求在断开后仍记录 `流式 PCM 完成: 61440 bytes (~1.3s 音频)`，
+即又生成了约 1.3 秒音频才收尾。
+
+### 11.4 修复
+
+把"无限阻塞 put"改成**带超时 + 复查取消标志的入队**（`src/tts/router.py` 的 `_worker`）：
+
+```python
+def enqueue(item) -> bool:
+    while True:
+        if state["cancel"]:
+            return False                       # 客户端已断开 → 立刻停止
+        try:
+            asyncio.run_coroutine_threadsafe(q.put(item), loop).result(timeout=0.2)
+            return True
+        except TimeoutError:
+            continue                           # 队列满 → 200ms 后重试并复查取消
+```
+
+**效果：取消→释放 由 5.2s 降到 2.4s（11.97× → 4.96×）。**
+
+### 11.5 仍未消除的约 2.4s（诚实记录）
+
+原因：`body()` 只在**写响应失败**时才被取消（Starlette 的
+`listen_for_disconnect` 依赖 uvicorn 通知，并非即时），所以从断开到取消之间
+worker 仍会继续生成约 1 秒音频；再加上一次分片生成（约 0.6s）与取消检查间隔。
+
+**要彻底消除需要把取消信号透进生成循环内部**（在骨架里每帧检查取消并 `close()` 生成器），
+属于对底层的更深改动。综合考虑：
+- 用户感知的等待已从"十几秒级"降到"约 2 秒"；
+- 本项目为**单用户优先**的毕业设计；
+
+**本次到此为止并如实记录**，不为最后 1–2 秒引入更复杂的改动。
+
+### 11.6 顺带修复：历史消息"朗读按钮变灰、点不动"
+
+真机反馈的另一现象：某条旧 AI 回复的朗读按钮是灰的、点了没反应。
+
+原因：该消息在旧链路下 `audioPending=true` 被落库，但音频始终没生成成功，
+于是加载历史后按钮一直停留在"加载中"的禁用态。
+
+修复（`AiConversationAdapter`）：只要正文非空，即使处于 `audioPending` 状态
+也让按钮**可点击**（点击即走"点击才生成"的流式合成）。

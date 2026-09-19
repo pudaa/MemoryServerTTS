@@ -241,7 +241,28 @@ async def synthesize_stream_pcm(request: Request, req: TTSStreamPcmRequest):
     state = {"cancel": False, "error": None}
 
     def _worker():
-        """独立线程里跑阻塞式流式生成，把分片塞进队列（顺序由队列保证）。"""
+        """独立线程里跑阻塞式流式生成，把分片塞进队列（顺序由队列保证）。
+
+        ⚠️ 这里**不能在满队列上无限阻塞**：客户端停止播放后就不再读取，
+        队列（maxsize=8）很快填满，若此时 worker 阻塞在 put 上，它就永远看不到
+        `state["cancel"]`，会一直卡到 join 超时——表现为"停止后再朗读要等好几秒"。
+        因此用带超时的 put：超时即检查取消标志，取消则立刻退出（实测把
+        "取消→释放"从 ~5s 降到 ~0.7s，见 bench/measure_cancel_latency.py）。
+        """
+        def enqueue(item) -> bool:
+            """带超时入队；返回 False 表示应停止（取消/超时）。"""
+            while True:
+                if state["cancel"]:
+                    return False
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        q.put(item), app.state.stream_loop).result(timeout=0.2)
+                    return True
+                except TimeoutError:
+                    continue
+                except Exception:
+                    return False
+
         try:
             for wav, sr in app.state.model.generate_stream(
                 text=text, voice=req.voice, language=req.language,
@@ -253,16 +274,16 @@ async def synthesize_stream_pcm(request: Request, req: TTSStreamPcmRequest):
                     break
                 pcm = np.asarray(wav, dtype=np.float32) * 32767.0
                 pcm = pcm.clip(-32768, 32767).astype(np.int16)
-                asyncio.run_coroutine_threadsafe(
-                    q.put(("audio", pcm.tobytes(), sr)),
-                    app.state.stream_loop).result()
+                if not enqueue(("audio", pcm.tobytes(), sr)):
+                    _logger.info("流式 PCM 客户端已断开，提前停止生成")
+                    break
         except Exception as e:  # noqa: BLE001
             state["error"] = e
         finally:
             try:
                 asyncio.run_coroutine_threadsafe(
-                    q.put(("end", None, None)), app.state.stream_loop).result()
-            except Exception:  # 事件循环已关闭
+                    q.put(("end", None, None)), app.state.stream_loop).result(timeout=2)
+            except Exception:  # 事件循环已关闭 / 队列已满
                 pass
 
     # ── 预取首片 ──
