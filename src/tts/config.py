@@ -194,6 +194,19 @@ class TTSConfig(BaseConfig):
         """
         return int(self._get("tts.streaming.max_seq_len", 2048))
 
+    @property
+    def warmup_stream_on_start(self) -> bool:
+        """启动时是否预热流式路径。
+
+        预热把"首次流式请求"的一次性开销（真实文本的 prompt 构建、
+        声码器/mel 惰性初始化）提前到启动期，代价是启动慢约 1–3 秒。
+        默认开启；如需更快启动可设 tts.streaming.warmup_on_start=false。
+        """
+        val = self._env("warmup_stream") or self._get("tts.streaming.warmup_on_start", True)
+        if isinstance(val, str):
+            return val.lower() in ("true", "1", "yes")
+        return bool(val)
+
     # ── 导出 ──
 
     def summary(self) -> dict:

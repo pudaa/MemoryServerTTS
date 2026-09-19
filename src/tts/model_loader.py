@@ -201,6 +201,11 @@ class TTSModelManager:
             _logger.info(f"支持音色({len(speakers)}): {speakers}")
             _logger.info(f"支持语言({len(languages)}): {languages}")
 
+            # ── 流式路径预热（启动期完成，避免第一个用户等更久）──
+            # 只在需要时做；失败不致命（见 warmup_stream 的说明）。
+            if cfg.warmup_stream_on_start:
+                self.warmup_stream()
+
             # ── torch.compile 优化（仅 upstream 后端需要；faster 后端自带 CUDA Graph）──
             if cfg.compile_enabled and cfg.backend != "faster":
                 _logger.info(f"torch.compile 优化中 (mode={cfg.compile_mode}, 首次较慢)...")
@@ -286,6 +291,40 @@ class TTSModelManager:
             _logger.warning(f"[faster] warmup 失败（首次生成会较慢）: {e}")
         self._backend_actual = "faster"
         return m
+
+    def warmup_stream(self, text: str = "Hello, this is a warm up for streaming playback.") -> bool:
+        """预热**流式**路径。
+
+        为什么 `warmup()` 不够：它只捕获 CUDA Graph。但流式请求还有若干
+        **首次才发生**的一次性开销：
+          - 真实文本的 prompt 构建（分词 + embeds，prefill 长度与 warmup 的
+            模拟长度不同 → `_build_attention_masks` 会重建一次掩码表）
+          - 第一次 `speech_tokenizer.decode()`（声码器模块/mel 滤波器惰性初始化）
+        实测首次流式请求 TTFA 约 850ms，热后约 550–630ms；本方法把那部分
+        提前到启动期完成。
+
+        实现：跑一次**最短**的流式生成并立即丢弃音频（1 帧的生成成本可忽略），
+        因此只增加启动时间，不引入额外风险。
+
+        返回是否成功（失败只告警，不影响服务可用）。
+        """
+        import time as _t
+        t0 = _t.perf_counter()
+        try:
+            n = 0
+            for _wav, _sr in self.generate_stream(
+                text=text, chunk_steps=self._config.stream_chunk_steps,
+                max_new_tokens=1,          # 只要跑通链路，无需真生成内容
+            ):
+                n += 1
+                break                      # 拿到第一片即可，后面不需要
+            _logger.success(
+                f"[warmup] 流式路径预热完成 ({_t.perf_counter()-t0:.2f}s, 首片 {n} 块)"
+            )
+            return n > 0
+        except Exception as e:  # noqa: BLE001
+            _logger.warning(f"[warmup] 流式路径预热失败（首次流式请求会稍慢）: {e}")
+            return False
 
     @property
     def backend(self) -> str:
