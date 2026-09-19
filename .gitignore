@@ -37,3 +37,7 @@ temp/
 
 # numba JIT 缓存（librosa 依赖；见 bench/README.md：目录不可写会导致 import qwen_tts 卡死）
 .numba-cache/
+
+# 基准脚本产出的试听样本（临时产物，不入库）
+bench/out/
+bench/out-*/
