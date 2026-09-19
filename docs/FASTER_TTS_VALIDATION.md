@@ -13,6 +13,11 @@
 关键点：其"必须 transformers 5.x"的约束是**包元数据强加的，不是代码需要的**——
 打 2 处兼容补丁后可在 **transformers 4.57.3** 上原样运行，性能无损。
 
+扩展验证（7 个 case，含 3 句长段落）显示收益比单句更大：
+基线 RTF 恒定 **2.24–2.50×**（长文本线性恶化到 **31.4s**），fast RTF 稳定 **0.50–0.99×**
+（同一长文本仅 **7.07s**，**4.4×**）。且 **ASR 内容校验与基线逐条等价**（平均 WER 相同、
+唯一失败项两者一致），可判定为**内容无损的纯加速**。
+
 ---
 
 ## 2. 背景修正（重要）
@@ -46,6 +51,9 @@ RTF_wall = 墙钟/音频（<1 才是快于实时）。
 | **CUDA Graph 1.7B** | perf / tf 5.15.1 | **1.79s** | 3.04s | **0.59×** | 1.70× | **414ms** | 4 247MB |
 | **CUDA Graph 1.7B（backport）** | **bp / tf 4.57.3** | **1.65s** | 2.83s | **0.58×** | 1.70× | **414ms** | 4 247MB |
 | **CUDA Graph 0.6B（backport）** | **bp / tf 4.57.3** | **1.46s** | 3.20s | **0.46×** | 2.17× | **346ms** | **2 319MB** |
+
+> 上表为固定文本 `"Hello. This is a speed benchmark test."`。
+> **对话式长文本的差距更大**：3 句段落基线要 **31.42s**，fast 只要 **7.07s**（见 §5.1）。
 
 单词语音（`"Ahead."`）：
 
@@ -86,19 +94,45 @@ CUDA Graph 预热（捕获）耗时仅 **1.5–1.8s**，远优于 `torch.compile
 
 ## 5. 音质与内容校验
 
-用主环境的 Faster-Whisper base 做 ASR 回读（同一批 wav）：
+### 5.1 多句 A/B 实测（7 个 case，覆盖真实长度分布）
 
-| 样本 | ASR 回读 | 判定 |
-|---|---|---|
-| 基线 1.7B 非流式 | `Hello, this is a Speed Benchmark test.` | ✅ |
-| CUDA Graph 1.7B 非流式 | `Hello, this is a speed benchmark test.` | ✅ |
-| CUDA Graph 1.7B 流式 | `Hello, this is a Speed Benchmark test.` | ✅ |
-| CUDA Graph 0.6B 非流式 | `Hello, this is a speed benchmark test.` | ✅ |
-| CUDA Graph 0.6B 流式 | `Hello, this is a Speed Benchmark test.` | ✅ |
-| 单词（1.7B，fast） | `Head.` | ⚠️ 丢首音 |
-| 单词（0.6B，fast） | `ahead.` | ✅ |
+同一环境（`memory-tts-bp`，transformers 4.57.3）内 back-to-back，原文→生成→Whisper 回读。
+`bench/ab_generate.py` 生成，`bench/ab_verify_asr.py` 校验。
 
-波形客观量（无削波、电平合理）：
+| case | 文本 | 基线耗时 | **fast 耗时** | 提速 | 基线 RTF | fast RTF |
+|---|---|---|---|---|---|---|
+| word1 | `Ahead.` | 1.96s | **0.48s** | 4.1× | 4.08× | **0.99×** |
+| word2 | `Well.` | 1.00s | **0.32s** | 3.1× | 2.50× | **0.66×** |
+| short1 | `How are you?` | 1.69s | **0.42s** | 4.0× | 2.35× | **0.66×** |
+| short2 | `That sounds great!` | 2.40s | **0.71s** | 3.4× | 2.31× | **0.59×** |
+| chat1 | I think you should give it another try tomorrow morning. | 6.85s | **1.24s** | 5.5× | 2.25× | **0.54×** |
+| chat2 | Reading aloud every day is one of the fastest ways… | 12.79s | **2.71s** | 4.7× | 2.25× | **0.51×** |
+| long1 | Learning a new language takes time and patience…（3 句） | **31.42s** | **7.07s** | **4.4×** | 2.24× | **0.50×** |
+
+**两个关键点：**
+
+1. **基线 RTF 恒定在 2.24–2.50×**（不随长度变化），所以长文本会线性恶化到 **31.4s**；
+   fast 方案 RTF 稳定在 **0.50–0.99×**，**长文本也只用 7.07s**。
+   即"目标 <2s"对 ≤60 字符的短句完全满足（0.32–1.24s），长段落也可用（7s 而非 31s）。
+2. **fast 的 RTF 始终 < 1**（0.50–0.66×，单词 0.99×），意味着**生成快于实时播放**，
+   流式场景不会出现"播放追不上生成"或反之的卡顿。
+
+### 5.2 ASR 内容一致性（词级 WER）
+
+| side | n | 平均 WER | 最大 WER | fail(>0.2) |
+|---|---|---|---|---|
+| 基线 | 7 | **0.1429** | 1.0000 | 1 |
+| **fast** | 7 | **0.1429** | 1.0000 | 1 |
+
+**逐条完全一致**：`chat1/chat2/long1/short1/short2/word2` 六个 case 两者 **WER 均为 0.000**，
+回读文本与原文逐字相符（含 `long1` 三句全对）。唯一失败项两者**同为 `word1`（`Ahead.`）**，
+回读 `Head` —— 这是**基线就存在的模型行为**（吞掉首元音），**不是 fast 引入的回归**。
+
+> 结论：**CUDA Graph 在内容正确性上与基线等价**，包括已知缺陷也一致。
+> 短单词吞首音正是项目既有 ASR 校验闭环（约束 G1/G3）要处理的情况；
+> fast 让单次生成从 ~2s 降到 0.48s，**使 best-of-N 重试从"昂贵"变为"廉价"**。
+
+### 5.3 波形客观量（无削波、电平合理）
 
 | 样本 | 时长 | 峰值 | RMS | dBFS | 削波 |
 |---|---|---|---|---|---|
@@ -107,13 +141,18 @@ CUDA Graph 预热（捕获）耗时仅 **1.5–1.8s**，远优于 `torch.compile
 | CG 1.7B 流式 | 2.80s | 0.805 | 0.1440 | −16.8 | 0 |
 | CG 0.6B 非流式 | 3.12s | 0.680 | 0.0974 | −20.2 | 0 |
 
-**结论**：句子级内容、电平、无削波均与基线一致，可安全替换。
-短单词存在偶发首音丢失（`ahead` → `Head`），这正是项目**既有 ASR 校验闭环**要处理的情况
-（约束 G1/G3）：fast 方案下单次生成仅 0.37–0.52s，**best-of-N 重试完全可行**，
-而基线单次 6–8s 使重试代价高昂。→ fast 方案实际上**让校验闭环更实用**。
+### 5.4 仍需人耳确认的部分
 
-⚠️ 待人工试听确认（客观指标不能替代听感）：音色一致性、韵律自然度、
-流式块边界是否有拼接感。样本在 `bench/out*/`（已 gitignore）。
+客观指标（ASR WER、波形、时长）**不能替代听感**。以下必须由人确认，
+已在 `bench/ab/index.html` 备好成对播放器（浏览器直接打开）：
+
+- 音色是否与基线一致（静态 KV 换了 SDPA kernel，数值非比特一致）
+- 韵律自然度、有无机械感
+- 流式块边界是否有拼接痕迹
+
+⚠️ 短单词（`Ahead.`）吞首音在**基线同样存在**，故不属于本方案引入的风险，
+但既然要做 chat 朗读，建议一并评估是否需要在单词场景改用 `instruct` 或载体句。
+
 
 ---
 
@@ -191,6 +230,14 @@ conda create -n memory-tts-bp --clone memory-tts -y
 $env:NUMBA_CACHE_DIR = "$PWD\.numba-cache"
 & "D:\DevVmEnv\Anaconda_envs\envs\memory-tts-bp\python.exe" .\.backport\bench_backport.py --model .\models\qwen-1.7b
 & "D:\DevVmEnv\Anaconda_envs\envs\memory-tts-bp\python.exe" .\.backport\bench_backport.py --model .\models\qwen-0.6b
+
+# 4) 生成 A/B 试听对照（基线 + fast 同环境跑，浏览器打开 index.html）
+& "D:\DevVmEnv\Anaconda_envs\envs\memory-tts-bp\python.exe" .\bench\ab_generate.py --side both --model .\models\qwen-1.7b
+start .\bench\ab\index.html
+
+# 5) ASR 内容校验（用主环境；需 HF_HUB_OFFLINE=1 走本地缓存）
+$env:HF_HUB_OFFLINE = "1"
+& "D:\DevVmEnv\Anaconda_envs\envs\memory-tts\python.exe" .\bench\ab_verify_asr.py
 ```
 
 > 注意：`--no-deps` 是刻意的。不要跑 `pip install faster-qwen3-tts`（不带 `--no-deps`），
@@ -200,21 +247,27 @@ $env:NUMBA_CACHE_DIR = "$PWD\.numba-cache"
 
 ## 8. 下一步（尚未执行）
 
-1. **人工试听** `bench/out*/` 的样本，确认音色/韵律/流式拼接（客观指标无法替代）。
+1. **人工试听** `bench/ab/index.html`（浏览器直接打开，成对播放器），
+   确认音色/韵律/流式拼接——这是唯一还缺的验证环节，客观指标不能替代。
 2. 把 fast 路径接进 `TtsModelManager`：**必须保持 `app.state.model_lock` 契约（约束 P1）**。
 3. 保持现有 `generate()` 的 3 元组返回与 `verify/seed` 语义（约束 A1），
    短/长文本分治（C2/G1）与单词语音 ASR 校验闭环（G3）不得改动。
 4. chat 朗读默认切 0.6B；1.7B 保留给带 `instruct` 的听写词库（约束 M1/M2）。
 5. 持久化观测：记录 p50/p95 TTFA 与 RTF，防止回归。
+6. CUDA Graph 的静态 KV 占固定显存；**与 ASR/OCR 同进程并发**的表现尚未实测
+   （约束 P1 要求 TTS 与 ASR 校验都在锁内，需确认不会 OOM）。
 
 ---
 
 ## 9. 诚实交代的局限
 
-- **未做人工试听**：音质结论仅基于 ASR 回读 + 波形客观量，不能替代人耳。
+- **未做人工试听**：音质结论基于 ASR 回读（7 case 词级 WER）+ 波形客观量，
+  **不能替代人耳**；音色一致性、韵律、流式拼接感仍需人确认。
 - **未接入服务**：本报告只验证了独立进程内的性能，未改任何服务代码，
   也未验证在 `model_lock` 与 ASR/OCR 同进程并发下的表现。
 - **首次测量偏高未定位**：16–19s 的初测无法复现，已废弃但不掩埋。
 - **上游未修**：`transformers>=5.15.1` 的上界问题、4.x 兼容性都还没进上游；
   backport 是我们自己维护的副本，上游升级后需要重新评估（见 `.backport` 内注释）。
-- **样本量小**：10 次左右生成、单一句子与单词；warm-up 后稳态之外的冷启动未系统测量。
+- **样本量**：7 个 case + 若干重复；覆盖 1 词到 3 句，但只用了 `aiden` 单个音色、
+  单一 language=English，**未测中文与其他音色**。
+- **只测了 Torch/CUDA-graph 后端**：GGML（qwentts.cpp）后端与纯 C 引擎路线未实测。
