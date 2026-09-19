@@ -34,3 +34,6 @@ temp/
 *.bak
 *.swp
 .workbuddy/
+
+# numba JIT 缓存（librosa 依赖；见 bench/README.md：目录不可写会导致 import qwen_tts 卡死）
+.numba-cache/
