@@ -17,6 +17,13 @@
 #     保持随机采样更自然，仅做轻量时长校验，失败重试 1 次。
 
 tts:
+  # ── 推理后端 ──
+  # upstream — 上游 qwen_tts 动态 KV（原行为，兼容性最好）
+  # faster   — .backport/faster_qwen3_tts 的 CUDA Graph + 静态 KV cache
+  #            实测 RTF_wall 2.25x -> 0.58x（约 4-5 倍），TTFA ~0.33s
+  #            依赖 .backport/ 存在；不可用时自动回退 upstream
+  backend: upstream
+
   # ── 模型 ──
   engine: sdpa                    # sdpa | flash_attention_2
   dtype: bfloat16                 # bfloat16 | float32 (float16 不兼容)
@@ -90,3 +97,11 @@ tts:
     best_of: 3                      # 预生成/在线回填默认候选数（多 seed 择优）
     seed_base: 1000                 # 候选 seed 起点（seed_base + i）
     conf_threshold: -1.0            # 评分置信度门槛（默认与 verification 一致）
+
+  # ── 流式 PCM 输出（/api/v1/tts/synthesize-stream）──
+  # 与 /synthesize 的整段 WAV 不同，该端点边生成边下发裸 PCM(int16LE/单声道)，
+  # 首片约 330ms 到达（实测与文本长度无关），供对话朗读使用。
+  streaming:
+    chunk_steps: 8                  # 每片帧数（1 帧≈80ms）→ 8 帧≈640ms 音频/片
+    max_new_tokens: 4096            # 单次流式生成上限帧数（4096 帧 ≈ 327s 音频）
+    max_seq_len: 2048              # faster 后端静态 KV 容量；⚠️ 低于回复所需帧数会静默截断

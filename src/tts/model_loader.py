@@ -1,11 +1,34 @@
 import os
 import re
+import sys
 import numpy as np
 import torch
 import torch._dynamo
 from qwen_tts import Qwen3TTSModel
 from src.common.logging import get_logger
 from src.tts.config import TTSConfig
+
+# ── faster 后端（CUDA Graph）本地 backport 的导入路径 ──
+# .backport/faster_qwen3_tts 是打了 transformers 4.x 兼容补丁的副本（MIT，
+# 见 .backport/README.md）。它**未安装**成包，靠 sys.path 注入，
+# 这样主环境依赖保持零变更（transformers 仍是 4.57.3）。
+_BACKPORT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    ".backport",
+)
+
+
+def _import_faster_cls():
+    """导入 backport 版 FasterQwen3TTS；不可用时返回 None（由调用方降级）。"""
+    if _BACKPORT_DIR not in sys.path:
+        sys.path.insert(0, _BACKPORT_DIR)
+    try:
+        from faster_qwen3_tts import FasterQwen3TTS  # type: ignore
+        return FasterQwen3TTS
+    except Exception as e:  # noqa: BLE001
+        _logger.warning(f"faster 后端不可用（{type(e).__name__}: {e}），将使用 upstream 后端")
+        return None
+
 
 # ── 全局 TF32 加速 (Ampere+ GPU, CC≥8.0) ──
 # 在模块导入时设置一次即可
@@ -138,7 +161,9 @@ class TTSModelManager:
                 "dtype": compute_dtype,
                 "attn_implementation": cfg.engine,
             }
-            if os.path.exists(local_primary):
+            if cfg.backend == "faster":
+                self.model = self._load_faster(local_primary, hf_primary, device, compute_dtype, cfg)
+            elif os.path.exists(local_primary):
                 _logger.info("开始加载模型...")
                 self.model = Qwen3TTSModel.from_pretrained(local_primary, **load_kwargs)
                 _logger.success(f"模型加载成功: {local_primary}")
@@ -147,13 +172,13 @@ class TTSModelManager:
                 self.model = Qwen3TTSModel.from_pretrained(hf_primary, **load_kwargs)
 
             _logger.success(f"模型就绪: device={self.model.device}")
-            speakers = self.model.get_supported_speakers()
-            languages = self.model.get_supported_languages()
+            speakers = self.get_supported_speakers()
+            languages = self.get_supported_languages()
             _logger.info(f"支持音色({len(speakers)}): {speakers}")
             _logger.info(f"支持语言({len(languages)}): {languages}")
 
-            # ── torch.compile 优化 ──
-            if cfg.compile_enabled:
+            # ── torch.compile 优化（仅 upstream 后端需要；faster 后端自带 CUDA Graph）──
+            if cfg.compile_enabled and cfg.backend != "faster":
                 _logger.info(f"torch.compile 优化中 (mode={cfg.compile_mode}, 首次较慢)...")
                 torch._dynamo.config.suppress_errors = True
                 try:
@@ -195,6 +220,73 @@ class TTSModelManager:
             except Exception as e2:
                 raise RuntimeError(f"All model loading attempts failed: {e2}")
 
+    def _load_faster(self, local_primary, hf_primary, device, compute_dtype, cfg):
+        """加载 backport 版 FasterQwen3TTS（CUDA Graph + 静态 KV cache）。
+
+        实测收益（RTX 4060 Laptop 8G，见 docs/FASTER_TTS_VALIDATION.md）：
+        短句 RTF_wall 从 2.25x 降到 0.58x（约 4-5 倍），TTFA ~0.33s。
+
+        与 upstream 的差异：
+        - 参数名不同：device / dtype / max_seq_len（不是 device_map）
+        - `warmup()` 必须调用一次以捕获 CUDA Graph（约 1.5-1.8s，很便宜）
+        - 模型对象是 wrapper，内层真模型在 `.model`（上游 Qwen3TTSModel）
+        """
+        FasterCls = _import_faster_cls()
+        if FasterCls is None:
+            _logger.warning("faster 后端不可用，回退 upstream 后端")
+            self._backend_actual = "upstream"
+            if os.path.exists(local_primary):
+                return Qwen3TTSModel.from_pretrained(
+                    local_primary, device_map=device, dtype=compute_dtype,
+                    attn_implementation=cfg.engine)
+            return Qwen3TTSModel.from_pretrained(
+                hf_primary, device_map=device, dtype=compute_dtype,
+                attn_implementation=cfg.engine)
+
+        path = local_primary if os.path.exists(local_primary) else hf_primary
+        _logger.info(f"[faster] 加载 CUDA Graph 后端: {path}")
+        m = FasterCls.from_pretrained(
+            path,
+            device="cuda" if str(device).startswith("cuda") else "cpu",
+            dtype=compute_dtype,
+            attn_implementation=cfg.engine,
+            max_seq_len=cfg.stream_max_seq_len,
+        )
+        # 捕获 CUDA Graph（幂等；首次约 1.5-1.8s）
+        import time as _t
+        t0 = _t.perf_counter()
+        try:
+            m.warmup(prefill_len=120)
+            _logger.success(f"[faster] CUDA Graph 捕获完成 ({_t.perf_counter()-t0:.1f}s)")
+        except Exception as e:  # noqa: BLE001
+            _logger.warning(f"[faster] warmup 失败（首次生成会较慢）: {e}")
+        self._backend_actual = "faster"
+        return m
+
+    @property
+    def backend(self) -> str:
+        """实际生效的后端：faster（CUDA Graph）或 upstream。"""
+        return getattr(self, "_backend_actual", "upstream")
+
+    def get_supported_speakers(self):
+        """支持音色列表。
+
+        faster 后端的 wrapper 没有这个方法，委托给它内部的上游模型对象。
+        """
+        m = self.model
+        fn = getattr(m, "get_supported_speakers", None)
+        if callable(fn):
+            return fn()
+        return getattr(m, "model", None) and m.model.get_supported_speakers()
+
+    def get_supported_languages(self):
+        """支持语言列表（同样需要委托到内层模型）。"""
+        m = self.model
+        fn = getattr(m, "get_supported_languages", None)
+        if callable(fn):
+            return fn()
+        return getattr(m, "model", None) and m.model.get_supported_languages()
+
     def generate(self, text: str, voice: str = "", language: str = "",
                  instructions: str = "", streaming: bool = False,
                  verify: bool | None = None, seed: int | None = None):
@@ -229,15 +321,9 @@ class TTSModelManager:
         language = _normalize_language(language) or cfg.default_language
         voice = voice or _pick_default_voice(language, cfg.default_voice)
 
-        text = text.strip()
-        text = re.sub(r'\s+', ' ', text)
+        # ── 文本规范化（与 generate_stream 共用同一口径）──
+        text = self._prepare_text(text, cfg)
         instructions = instructions.strip() if instructions else None
-
-        # ── 极短文本修复 ──
-        if len(text) < cfg.short_text_threshold and not re.search(r'[.!?]$', text):
-            text = text[0].upper() + text[1:] if text else text
-            text = text.rstrip(',;:') + '.'
-            _logger.debug(f"短文本自动补标点: {text[:60]}")
 
         is_short = is_single_word(text, cfg.verify_text_threshold)
         if not is_short:
@@ -248,6 +334,88 @@ class TTSModelManager:
         return self._generate_short(
             text, voice, language, instructions, streaming,
             verify=verify, seed=seed, cfg=cfg)
+
+    # ────────────────────────────────────────────────
+    # 流式生成（按帧产出，供 /synthesize-stream 边生成边下发）
+    # ────────────────────────────────────────────────
+    def _prepare_text(self, text: str, cfg) -> str:
+        """生成前的文本规范化（generate 与 generate_stream 共用，避免两套口径）。"""
+        t = (text or "").strip()
+        t = re.sub(r"\s+", " ", t)
+        if not t:
+            raise ValueError("text is required")
+        # 极短文本补标点，提升韵律稳定性
+        if len(t) < cfg.short_text_threshold and not re.search(r"[.!?]$", t):
+            t = t[0].upper() + t[1:]
+            t = t.rstrip(",;:") + "."
+        return t
+
+    def generate_stream(self, text: str, voice: str = "", language: str = "",
+                        instructions: str = "", chunk_steps: int | None = None,
+                        max_new_tokens: int | None = None):
+        """流式生成，逐片 yield (wav_float32, sample_rate)。
+
+        与 generate() 的区别：**不等整段生成完**，首片约 330ms 即可拿到
+        （实测与文本长度无关，见 docs/STREAMING_ARCHITECTURE_ANALYSIS.md §2.5）。
+
+        注意：
+        - 本方法**不做** ASR 校验（流式实时性优先，与 /stream 的既有约定一致）；
+        - 调用方**必须**持有 app.state.model_lock（约束 P1）；
+        - 生成是阻塞的，需在独立线程中消费（见 router 的实现）；
+        - `max_new_tokens` 必须 <= 模型静态缓存的 max_seq_len，
+          否则底层**静默截断**（见 docs/CONV_SPEED_ASSESSMENT.md §4.2）。
+        """
+        cfg = self._config
+        language = _normalize_language(language) or cfg.default_language
+        voice = voice or _pick_default_voice(language, cfg.default_voice)
+        t = self._prepare_text(text, cfg)
+        ins = instructions.strip() if instructions else None
+
+        chunk_steps = chunk_steps or cfg.stream_chunk_steps
+        max_new = max_new_tokens or cfg.stream_max_new_tokens
+
+        # 防止超长文本被静默截断：静态缓存容量是硬上限
+        max_seq = getattr(self.model, "max_seq_len", None)
+        if max_seq and max_new > max_seq:
+            _logger.warning(
+                f"max_new_tokens({max_new}) > 模型 max_seq_len({max_seq})，"
+                f"已收敛为 {max_seq}（超出会静默截断音频）"
+            )
+            max_new = max_seq
+
+        _logger.info(
+            f"流式生成开始: len={len(t)} voice={voice} lang={language} "
+            f"chunk_steps={chunk_steps} max_new={max_new} backend={self.backend}"
+        )
+
+        # 结构说明（实测确认）：
+        #   faster 后端: self.model 是 FasterQwen3TTS wrapper
+        #                → 流式 API 在 **wrapper 上**（不是 .model 上）
+        #                → self.model.model 才是上游 Qwen3TTSModel
+        #   upstream  : self.model 本身就是 Qwen3TTSModel，**没有流式 API**
+        stream_fn = getattr(self.model, "generate_custom_voice_streaming", None)
+        if callable(stream_fn):
+            # faster 后端：真正逐片产出（首片 ~330ms）
+            for wav, sr, _timing in stream_fn(
+                text=t, speaker=voice, language=language, instruct=ins,
+                chunk_size=chunk_steps, max_new_tokens=max_new,
+            ):
+                yield wav, sr
+        else:
+            # upstream 后端：没有流式 API —— 整段生成后作为**单片**返回。
+            # 这仍然有用（HTTP 层可以早发头、且与 faster 后端接口一致），
+            # 但**首片延迟等于整段生成时间**。日志明确提示，避免误判。
+            _logger.warning(
+                "当前后端不支持真正的流式生成（upstream），整段生成后单片返回；"
+                "如需低首片延迟请设置 tts.backend=faster"
+            )
+            inner = getattr(self.model, "model", self.model)
+            wavs, sr = inner.generate_custom_voice(
+                text=t, language=language, speaker=voice, instruct=ins,
+                non_streaming_mode=True,
+                max_new_tokens=min(max_new, 2048),
+            )
+            yield np.asarray(wavs[0], dtype=np.float32), sr
 
     # ────────────────────────────────────────────────
     # 短文本（单词/听写）：确定性解码 + ASR 校验闭环

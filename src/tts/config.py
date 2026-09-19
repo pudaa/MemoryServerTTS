@@ -159,6 +159,41 @@ class TTSConfig(BaseConfig):
     def long_duration_bias(self) -> float:
         return float(self._get("tts.verification.long_duration_bias", 4.0))
 
+    # ── 流式 PCM 输出 ──
+
+    @property
+    def backend(self) -> str:
+        """推理后端：`upstream`（上游动态 KV）| `faster`（CUDA Graph）。
+
+        `faster` 使用 .backport/faster_qwen3_tts（MIT，已打 transformers 4.x 兼容补丁），
+        实测短句 RTF_wall 从 2.25x 降到 0.58x。不可用时自动回退 upstream。
+        """
+        val = self._env("backend") or self._get("tts.backend", "upstream")
+        return str(val).strip().lower()
+
+    @property
+    def stream_chunk_steps(self) -> int:
+        """流式输出时每片包含的帧数（1 帧≈80ms 音频）。
+
+        8 帧 ≈ 640ms 音频/片。片越小首声越快但每片固定开销占比越高。
+        实测 chunk_size=8 时 TTFA 稳定在 ~330ms（与文本长度无关）。
+        """
+        return int(self._get("tts.streaming.chunk_steps", 8))
+
+    @property
+    def stream_max_new_tokens(self) -> int:
+        """流式单次生成的上限帧数。默认 4096 帧 ≈ 327s 音频，足够长回复。"""
+        return int(self._get("tts.streaming.max_new_tokens", 4096))
+
+    @property
+    def stream_max_seq_len(self) -> int:
+        """faster 后端静态 KV 缓存的容量（token 数）。
+
+        ⚠️ 必须 >= 最长回复所需帧数，否则底层**静默截断**音频
+        （见 docs/CONV_SPEED_ASSESSMENT.md §4.2）。2048 帧 ≈ 164s 音频。
+        """
+        return int(self._get("tts.streaming.max_seq_len", 2048))
+
     # ── 导出 ──
 
     def summary(self) -> dict:

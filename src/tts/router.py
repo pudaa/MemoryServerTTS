@@ -1,5 +1,5 @@
 """TTS 模块路由 —— 文本转语音 API (WebSocket 由 server.py 管理)"""
-import os, re, uuid, tempfile, json, urllib.parse
+import asyncio, os, re, threading, time, uuid, tempfile, json, urllib.parse
 from pathlib import Path
 import numpy as np
 import soundfile as sf
@@ -7,6 +7,10 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
+
+from src.common.logging import get_logger
+
+_logger = get_logger("TTS")
 
 router = APIRouter(prefix="/api/v1/tts", tags=["TTS"])
 
@@ -30,6 +34,15 @@ class TTSStreamRequest(BaseModel):
     instructions: str | None = None
     max_chunk_chars: int = 200
     verify: bool | None = None    # None/False=默认不校验（流式实时性优先），True=逐块校验
+
+class TTSStreamPcmRequest(BaseModel):
+    """流式 PCM 合成请求（对话朗读用，见 docs/STREAMING_ARCHITECTURE_ANALYSIS.md）"""
+    text: str
+    voice: str = "aiden"
+    language: str = "English"
+    instructions: str | None = None
+    chunk_steps: int | None = None   # 覆盖配置；每片帧数（1 帧≈80ms 音频）
+    max_new_tokens: int | None = None
 
 def _cleanup(path: str):
     try: os.remove(path)
@@ -183,6 +196,142 @@ async def synthesize_stream(request: Request, req: TTSStreamRequest):
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         }
+    )
+
+@router.post("/synthesize-stream")
+async def synthesize_stream_pcm(request: Request, req: TTSStreamPcmRequest):
+    """
+    流式合成 —— 边生成边下发**裸 PCM**（int16LE / 单声道）。
+
+    与 /synthesize 的区别：
+    - /synthesize        ：整段生成完才返回，首字节要等全部生成（长文本 30s+）
+    - /synthesize-stream ：首片约 330ms 即到达（实测与文本长度无关）
+
+    响应：
+    - Content-Type: audio/L16;rate=<sr>;channels=1   （原始有符号 16bit 小端 PCM）
+    - X-Audio-Sample-Rate / X-Audio-Channels / X-Audio-Bits / X-Audio-Format
+    - X-TTS-TTFA-Ms：服务端测得的首片耗时（便于定位链路瓶颈）
+
+    注意：PCM **不含**头部与时长信息，客户端必须按响应头解释
+    （采样率 24000、单声道、16bit、小端）；总时长只能靠字节数累计推断。
+
+    实现要点：
+    - 生成跑在**独立线程**里（模型是阻塞的），通过 `asyncio.Queue` 把分片
+      送回事件循环，保证顺序且不阻塞其他请求；
+    - 全程持有 `app.state.model_lock`（约束 P1：GPU 调用必须串行）；
+    - 客户端断开时置取消标志，尽快停掉生成，避免空跑占用 GPU。
+    """
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    cfg = getattr(request.app.state, "tts_config", None)
+    chunk_steps = req.chunk_steps or (cfg.stream_chunk_steps if cfg else 8)
+    max_new = req.max_new_tokens or (cfg.stream_max_new_tokens if cfg else 4096)
+
+    # 极短文本补标点（与 /stream 保持一致；不注入任何情绪指令，约束 C1）
+    if len(text) < 80 and not re.search(r'[.!?]$', text):
+        text = text.rstrip(',;:') + '.'
+
+    app = request.app
+    q: asyncio.Queue = asyncio.Queue(maxsize=8)   # 有界：给 GPU 侧反压，避免无界堆积
+    state = {"cancel": False, "error": None}
+
+    def _worker():
+        """独立线程里跑阻塞式流式生成，把分片塞进队列（顺序由队列保证）。"""
+        try:
+            for wav, sr in app.state.model.generate_stream(
+                text=text, voice=req.voice, language=req.language,
+                instructions=req.instructions,
+                chunk_steps=chunk_steps, max_new_tokens=max_new,
+            ):
+                if state["cancel"]:
+                    break
+                pcm = np.asarray(wav, dtype=np.float32) * 32767.0
+                pcm = pcm.clip(-32768, 32767).astype(np.int16)
+                asyncio.run_coroutine_threadsafe(
+                    q.put(("audio", pcm.tobytes(), sr)),
+                    app.state.stream_loop).result()
+        except Exception as e:  # noqa: BLE001
+            state["error"] = e
+        finally:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    q.put(("end", None, None)), app.state.stream_loop).result()
+            except Exception:  # 事件循环已关闭
+                pass
+
+    # ── 预取首片 ──
+    # 目的：① 响应头能带上**真实采样率**；② 把"等首片"的时间准确计入 TTFA 日志。
+    # 锁在「预取前获取」，在「生成结束时释放」——生成期间必须一直持锁（约束 P1）。
+    await app.state.model_lock.acquire()
+    th = threading.Thread(target=_worker, daemon=True)
+    th.start()
+    t0 = time.perf_counter()
+    try:
+        first = await asyncio.wait_for(q.get(), timeout=60.0)
+    except asyncio.TimeoutError:
+        state["cancel"] = True
+        th.join(timeout=5)
+        app.state.model_lock.release()
+        raise HTTPException(status_code=504, detail="TTS 流式生成首片超时（60s）")
+
+    if state["error"] is not None:
+        th.join(timeout=5)
+        app.state.model_lock.release()
+        raise HTTPException(status_code=500, detail=f"TTS 流式生成失败: {state['error']}")
+
+    kind0, payload0, sr0 = first
+    first_ms = (time.perf_counter() - t0) * 1000
+    sr_hint = sr0 or 24000
+
+    async def body():
+        total = 0
+        try:
+            if kind0 == "audio" and payload0:
+                _logger.info(
+                    f"流式 PCM 首片: text_len={len(text)} ttfa={first_ms:.0f}ms sr={sr_hint}"
+                )
+                total += len(payload0)
+                yield payload0
+            while True:
+                kind, payload, _ = await q.get()
+                if kind == "end":
+                    break
+                total += len(payload)
+                yield payload
+        except asyncio.CancelledError:
+            # 客户端断开：尽快停掉生成，避免空跑占 GPU
+            state["cancel"] = True
+            raise
+        finally:
+            state["cancel"] = True
+            th.join(timeout=5)
+            if state["error"] is not None:
+                _logger.error(f"流式 PCM 生成失败: {state['error']}")
+            else:
+                _logger.success(
+                    f"流式 PCM 完成: {total} bytes "
+                    f"(~{total / 2 / sr_hint:.1f}s 音频), 首片 {first_ms:.0f}ms"
+                )
+            if app.state.model_lock.locked():
+                try:
+                    app.state.model_lock.release()
+                except RuntimeError:
+                    pass
+
+    return StreamingResponse(
+        body(),
+        media_type=f"audio/L16;rate={sr_hint};channels=1",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Audio-Sample-Rate": str(sr_hint),
+            "X-Audio-Channels": "1",
+            "X-Audio-Bits": "16",
+            "X-Audio-Format": "pcm_s16le",
+            "X-TTS-TTFA-Ms": f"{first_ms:.0f}",
+        },
     )
 
 @router.get("/voices")

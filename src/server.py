@@ -42,6 +42,8 @@ app.mount("/tts-audio", StaticFiles(directory="tts-audio", check_dir=False), nam
 
 @app.on_event("startup")
 async def startup_event():
+    # 供流式端点把音频分片从工作线程安全送回事件循环（见 src/tts/router.py）
+    app.state.stream_loop = asyncio.get_running_loop()
     app.state.tts_config = TTSConfig()
     app.state.model = TTSModelManager(config=app.state.tts_config)
     app.state.asr_model = ASRModelManager()

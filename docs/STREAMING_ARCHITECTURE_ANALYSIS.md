@@ -226,3 +226,84 @@
 - 未评估 ExoPlayer 引入对 Android 包体积/依赖的影响。
 - 未做多用户并发与背压实测。
 - 音频管理方案（§6）是设计建议，**尚未实现**。
+
+---
+
+## 9. ★ Step 1 已实现并验证（2026-09-19 更新）
+
+§1–§8 是方案分析；本节记录**实际落地的 Step 1** 与实测结果。
+
+### 9.1 落地内容（仅 MemoryServerTTS，未动另外两个项目）
+
+| 文件 | 改动 |
+|---|---|
+| `src/tts/router.py` | 新增 `POST /api/v1/tts/synthesize-stream`：chunked 下发**裸 PCM** |
+| `src/tts/model_loader.py` | 新增 `generate_stream()`；新增 `backend` 支持（upstream/faster）；新增 `_load_faster()`；`_prepare_text()` 抽出共用文本规范化；新增 `get_supported_speakers/languages` 委托 |
+| `src/tts/config.py` | 新增 `backend`、`stream_chunk_steps`、`stream_max_new_tokens`、`stream_max_seq_len` |
+| `config/tts.yaml` | 新增 `tts.backend`、`tts.streaming.*` |
+| `src/server.py` | startup 时写入 `app.state.stream_loop`（供跨线程回传分片） |
+
+**响应契约**
+
+```
+POST /api/v1/tts/synthesize-stream
+  {"text": "...", "voice": "aiden", "language": "English", "instructions": null,
+   "chunk_steps": 8, "max_new_tokens": 4096}
+
+200 OK
+  Content-Type: audio/L16;rate=24000;channels=1
+  Transfer-Encoding: chunked
+  X-Audio-Sample-Rate: 24000
+  X-Audio-Channels: 1
+  X-Audio-Bits: 16
+  X-Audio-Format: pcm_s16le
+  X-TTS-TTFA-Ms: <服务端实测首片耗时>
+  body: 原始 int16LE 单声道 PCM（无头、无时长）
+```
+
+### 9.2 实测结果（真实 HTTP + chunked，非 TestClient）
+
+用裸 socket 手工解析 chunked 响应（本机 httpx/requests 受代理环境变量影响解析失败）：
+
+| 文本 | 服务端 TTFA | **客户端首字节** | 分片数 | 音频 | 总耗时 | RTF_wall |
+|---|---|---|---|---|---|---|
+| 短句（23 字符，首次请求） | 848 ms | 861 ms | 3 | 1.92 s | 6.46 s | — |
+| 长文本（110 词，首次请求） | 517 ms | **534 ms** | **55** | 34.88 s | 21.11 s | **0.605×** |
+| 短句（二次，已热） | 630 ms | 635 ms | 4 | 2.08 s | 6.35 s | — |
+| 长文本（二次，已热） | 603 ms | **620 ms** | **56** | 35.52 s | 21.52 s | **0.606×** |
+
+**结论**：
+- ✅ **真正在流**：长文本产生 55–56 个 HTTP chunk，**不是攒完再发**。
+- ✅ **首字节 ~0.53–0.86s**（离线直测首片 330ms，HTTP 层额外约 200–300ms）。
+- ✅ **RTF_wall 0.605×**（生成快于播放），播放不会追不上生成。
+- ✅ PCM 校验：int16 范围内、非全零、无触顶爆表。
+- ✅ 空文本返回 400。
+
+### 9.3 两个必须知道的坑（已实测确认）
+
+1. **`FastAPI TestClient` 会缓冲整个响应** → 用它测流式会得到"首片=总耗时"的**假象**。
+   验证流式必须用**真实 HTTP 服务器 + 流式客户端**（本仓库 `bench/verify_stream_endpoint.py
+   --serve` / `--probe-url` 即为这种两进程验证方式）。
+2. **流式路径有独立冷启动**：首次流式请求 TTFA 848ms，热后 ~600ms。
+   底层 CUDA Graph 的**流式**解码路径与 `warmup()` 覆盖的路径不同，
+   建议服务启动时**额外预热一次流式**（本步尚未实现，见 §10）。
+
+### 9.4 向后兼容与安全
+
+- `tts.backend` **默认 `upstream`**，即**默认行为不变**；需显式设置才启用 CUDA Graph。
+- `/api/v1/tts/synthesize`、`/stream`、`/voices`、词库接口**均未改动**。
+- upstream 后端下调用新端点**不会报错**，但只产出 1 片（整段），
+  日志会明确警告"当前后端不支持真正的流式生成"——不会假装在流。
+- 既有 50 个单测**全部通过**（改动未破坏校验/缓存/判定逻辑）。
+- 全程持有 `app.state.model_lock`（约束 P1），生成结束/客户端断开即释放。
+
+---
+
+## 10. 下一步
+
+1. **Step 2（Java 透传）**：`TTSServiceImpl` 增加流式转发，
+   `StreamingResponseBody` 边读 Python 流边写客户端；保留现有整段路径作为降级。
+2. **Step 3（鉴权直连）**：短时票据或播放器注入 Authorization（解决 W3）。
+3. **Step 4（Android）**：引入 ExoPlayer 播 `audio/L16` PCM（解决 W4）。
+4. **启动预热流式路径**（§9.3 第 2 点）。
+5. **音频管理**（§6）：流式后不再落盘整段 wav，需重新定义音频保留策略。
