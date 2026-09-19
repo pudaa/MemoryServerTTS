@@ -44,3 +44,5 @@ bench/out/
 bench/out-*/
 bench/ab-out/*.wav
 bench/ab-out/index.html
+# 对话场景评估：只留指标 JSON（verify.json），音频不入库
+bench/conv-out/*.wav

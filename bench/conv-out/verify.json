@@ -1,0 +1,50 @@
+[
+  {
+    "file": "chat_200w_qwen-0.6b_s2048.wav",
+    "dur": 78.32,
+    "words": 198,
+    "wps": 2.528,
+    "wer": 0.0051,
+    "n_seg": 15
+  },
+  {
+    "file": "chat_200w_qwen-1.7b_s2048.wav",
+    "dur": 78.32,
+    "words": 198,
+    "wps": 2.528,
+    "wer": 0.0,
+    "n_seg": 14
+  },
+  {
+    "file": "chat_mid_qwen-0.6b_s2048.wav",
+    "dur": 10.48,
+    "words": 36,
+    "wps": 3.435,
+    "wer": 0.0,
+    "n_seg": 4
+  },
+  {
+    "file": "chat_mid_qwen-1.7b_s2048.wav",
+    "dur": 13.04,
+    "words": 36,
+    "wps": 2.761,
+    "wer": 0.0,
+    "n_seg": 5
+  },
+  {
+    "file": "chat_short_qwen-0.6b_s2048.wav",
+    "dur": 2.4,
+    "words": 7,
+    "wps": 2.917,
+    "wer": 0.0,
+    "n_seg": 1
+  },
+  {
+    "file": "chat_short_qwen-1.7b_s2048.wav",
+    "dur": 1.76,
+    "words": 7,
+    "wps": 3.977,
+    "wer": 0.0,
+    "n_seg": 1
+  }
+]
