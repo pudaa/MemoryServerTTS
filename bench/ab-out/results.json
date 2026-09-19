@@ -1,0 +1,128 @@
+[
+  {
+    "key": "word1",
+    "text": "Ahead.",
+    "side": "base",
+    "file": "base_word1.wav",
+    "gen_s": 1.863,
+    "dur_s": 0.48,
+    "rtf_wall": 3.881
+  },
+  {
+    "key": "word2",
+    "text": "Well.",
+    "side": "base",
+    "file": "base_word2.wav",
+    "gen_s": 1.0,
+    "dur_s": 0.4,
+    "rtf_wall": 2.501
+  },
+  {
+    "key": "short1",
+    "text": "How are you?",
+    "side": "base",
+    "file": "base_short1.wav",
+    "gen_s": 1.694,
+    "dur_s": 0.72,
+    "rtf_wall": 2.353
+  },
+  {
+    "key": "short2",
+    "text": "That sounds great!",
+    "side": "base",
+    "file": "base_short2.wav",
+    "gen_s": 2.405,
+    "dur_s": 1.04,
+    "rtf_wall": 2.312
+  },
+  {
+    "key": "chat1",
+    "text": "I think you should give it another try tomorrow morning.",
+    "side": "base",
+    "file": "base_chat1.wav",
+    "gen_s": 6.85,
+    "dur_s": 3.04,
+    "rtf_wall": 2.253
+  },
+  {
+    "key": "chat2",
+    "text": "Reading aloud every day is one of the fastest ways to improve your pronunciation and fluency.",
+    "side": "base",
+    "file": "base_chat2.wav",
+    "gen_s": 12.79,
+    "dur_s": 5.68,
+    "rtf_wall": 2.252
+  },
+  {
+    "key": "long1",
+    "text": "Learning a new language takes time and patience. Don't worry if you make mistakes, because every mistake is a chance to learn something new. Keep practicing a little bit each day, and you will be surprised by how much progress you make.",
+    "side": "base",
+    "file": "base_long1.wav",
+    "gen_s": 31.42,
+    "dur_s": 14.0,
+    "rtf_wall": 2.244
+  },
+  {
+    "key": "word1",
+    "text": "Ahead.",
+    "side": "fast",
+    "file": "fast_word1.wav",
+    "gen_s": 0.477,
+    "dur_s": 0.48,
+    "rtf_wall": 0.993
+  },
+  {
+    "key": "word2",
+    "text": "Well.",
+    "side": "fast",
+    "file": "fast_word2.wav",
+    "gen_s": 0.317,
+    "dur_s": 0.48,
+    "rtf_wall": 0.661
+  },
+  {
+    "key": "short1",
+    "text": "How are you?",
+    "side": "fast",
+    "file": "fast_short1.wav",
+    "gen_s": 0.424,
+    "dur_s": 0.64,
+    "rtf_wall": 0.663
+  },
+  {
+    "key": "short2",
+    "text": "That sounds great!",
+    "side": "fast",
+    "file": "fast_short2.wav",
+    "gen_s": 0.708,
+    "dur_s": 1.2,
+    "rtf_wall": 0.59
+  },
+  {
+    "key": "chat1",
+    "text": "I think you should give it another try tomorrow morning.",
+    "side": "fast",
+    "file": "fast_chat1.wav",
+    "gen_s": 1.244,
+    "dur_s": 2.32,
+    "rtf_wall": 0.536
+  },
+  {
+    "key": "chat2",
+    "text": "Reading aloud every day is one of the fastest ways to improve your pronunciation and fluency.",
+    "side": "fast",
+    "file": "fast_chat2.wav",
+    "gen_s": 2.715,
+    "dur_s": 5.28,
+    "rtf_wall": 0.514
+  },
+  {
+    "key": "long1",
+    "text": "Learning a new language takes time and patience. Don't worry if you make mistakes, because every mistake is a chance to learn something new. Keep practicing a little bit each day, and you will be surprised by how much progress you make.",
+    "side": "fast",
+    "file": "fast_long1.wav",
+    "gen_s": 7.066,
+    "dur_s": 14.0,
+    "rtf_wall": 0.505
+  }
+]

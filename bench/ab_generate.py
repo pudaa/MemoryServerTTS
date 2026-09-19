@@ -31,7 +31,7 @@ if os.path.isdir(_BP):
 import soundfile as sf  # noqa: E402
 import torch  # noqa: E402
 
-OUTDIR = os.path.join("bench", "ab")
+OUTDIR = os.path.join("bench", "ab-out")
 SPEAKER = "aiden"
 LANGUAGE = "English"
 

@@ -39,5 +39,8 @@ temp/
 .numba-cache/
 
 # 基准脚本产出的试听样本（临时产物，不入库）
+# 注意：bench/ab-out/ 只忽略音频与试听页，results.json / asr_wer.json 入库作为证据。
 bench/out/
 bench/out-*/
+bench/ab-out/*.wav
+bench/ab-out/index.html
