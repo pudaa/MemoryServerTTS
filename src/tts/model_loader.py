@@ -83,6 +83,30 @@ def _pick_default_voice(language, fallback: str) -> str:
     return fallback
 
 
+def _derive_seed(text: str, voice: str, language: str,
+                 instructions: str | None) -> int:
+    """由生成输入派生一个稳定的 seed（确定性采样用）。
+
+    为什么需要：对话朗读是"点击才生成"，同一条回复可能被点多次。
+    若每次随机采样，用户会听到"同一句每次念得不一样"，且重复点击会导致
+    听感不一致。用文本派生的固定 seed 后，同一 (文本,音色,语言,指令)
+    每次生成**完全相同**的音频——从而既不需要缓存、也不浪费 GPU。
+
+    注意：不同文本几乎必然得到不同 seed（SHA-256 取模），
+    所以音频的多样性不受影响（该有的语调变化仍在）。
+    """
+    import hashlib
+    key = "\u0001".join([
+        (text or "").strip(),
+        str(voice or "").strip().lower(),
+        str(language or "").strip().lower(),
+        (instructions or "").strip(),
+    ])
+    digest = hashlib.sha256(key.encode("utf-8")).digest()
+    # 取前 4 字节 → 31 位正整数，避免超过部分后端 seed 的 int32 范围
+    return int.from_bytes(digest[:4], "big") & 0x7FFFFFFF
+
+
 # 尾部标点（服务端短文本修复可能补句号，判定时剥离）
 _TRAILING_PUNCT = ".,;:!?'\"。，；：！？’\""
 
@@ -352,11 +376,16 @@ class TTSModelManager:
 
     def generate_stream(self, text: str, voice: str = "", language: str = "",
                         instructions: str = "", chunk_steps: int | None = None,
-                        max_new_tokens: int | None = None):
+                        max_new_tokens: int | None = None, seed: int | None = None):
         """流式生成，逐片 yield (wav_float32, sample_rate)。
 
         与 generate() 的区别：**不等整段生成完**，首片约 330ms 即可拿到
         （实测与文本长度无关，见 docs/STREAMING_ARCHITECTURE_ANALYSIS.md §2.5）。
+
+        **确定性（seed）**：对话朗读采用"点击才生成"的语义，用户可能对同一条回复
+        多次点击。因此默认用**由文本派生的固定 seed**，保证同一 (文本,音色,语言,指令)
+        每次生成出**完全相同**的音频——用户不会听到"同一句每次念得不一样"，
+        也不需要为此落盘缓存。传 `seed=None` 之外的显式值可覆盖。
 
         注意：
         - 本方法**不做** ASR 校验（流式实时性优先，与 /stream 的既有约定一致）；
@@ -383,9 +412,30 @@ class TTSModelManager:
             )
             max_new = max_seq
 
+        # ── 确定性地播种 ──
+        # 底层流式 API 不支持 seed 参数。这里**不能**只用 torch.manual_seed：
+        # CUDA Graph 重放会捕获/影响全局 CUDA RNG 状态，实测同一文本两次结果不同
+        # （见 bench/verify_stream_determinism.py）。因此额外构造一个**独立的
+        # torch.Generator** 传给采样，使随机源与全局状态解耦，才能真正复现。
+        #
+        # ⚠️ generator 的设备必须与 logits 一致：cuda 张量只接受 cuda generator
+        # （否则 RuntimeError: Expected a 'cuda' device type for generator）。
+        if seed is None:
+            seed = _derive_seed(t, voice, language, ins)
+        torch.manual_seed(seed)
+        try:
+            dev = next(self.model.parameters()).device
+        except Exception:
+            dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+        gen = torch.Generator(device=dev.type)
+        gen.manual_seed(seed)
+
         _logger.info(
             f"流式生成开始: len={len(t)} voice={voice} lang={language} "
-            f"chunk_steps={chunk_steps} max_new={max_new} backend={self.backend}"
+            f"chunk_steps={chunk_steps} max_new={max_new} seed={seed} "
+            f"gen_device={dev.type} backend={self.backend}"
         )
 
         # 结构说明（实测确认）：
@@ -399,6 +449,7 @@ class TTSModelManager:
             for wav, sr, _timing in stream_fn(
                 text=t, speaker=voice, language=language, instruct=ins,
                 chunk_size=chunk_steps, max_new_tokens=max_new,
+                generator=gen,
             ):
                 yield wav, sr
         else:

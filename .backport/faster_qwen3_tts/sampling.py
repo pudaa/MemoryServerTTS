@@ -38,10 +38,16 @@ def sample_logits(
     do_sample: bool,
     suppress_mask: Optional[torch.Tensor] = None,
     suppress_tokens: Optional[Iterable[int]] = None,
+    generator: Optional[torch.Generator] = None,
 ) -> torch.Tensor:
     """Sample a token from logits.
 
     Mirrors HF order: suppress -> temperature -> top-k -> top-p -> sample.
+
+    `generator`（backport 扩展）：显式随机源。
+    为什么需要它而不是 `torch.manual_seed`：CUDA Graph 重放会捕获/影响全局 CUDA
+    RNG 状态，导致"固定 seed"不可靠（实测同文本两次结果不同）。传入独立的
+    `torch.Generator` 后采样与全局状态解耦，才能真正复现。
     """
     logits = logits.clone()
     if suppress_mask is not None:
@@ -63,4 +69,7 @@ def sample_logits(
         sorted_logits[sorted_indices_to_remove] = float("-inf")
         logits = torch.full_like(logits, float("-inf"))
         logits.scatter_(-1, sorted_indices, sorted_logits)
-    return torch.multinomial(F.softmax(logits, dim=-1), 1).squeeze(-1)
+    probs = F.softmax(logits, dim=-1)
+    if generator is not None:
+        return torch.multinomial(probs, 1, generator=generator).squeeze(-1)
+    return torch.multinomial(probs, 1).squeeze(-1)

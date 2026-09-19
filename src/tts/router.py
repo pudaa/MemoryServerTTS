@@ -43,6 +43,9 @@ class TTSStreamPcmRequest(BaseModel):
     instructions: str | None = None
     chunk_steps: int | None = None   # 覆盖配置；每片帧数（1 帧≈80ms 音频）
     max_new_tokens: int | None = None
+    # 采样种子。缺省（null）时由服务端**按文本派生固定 seed**，
+    # 保证同一文本每次点击生成出完全相同的音频（可复现，无需缓存）。
+    seed: int | None = None
 
 def _cleanup(path: str):
     try: os.remove(path)
@@ -244,6 +247,7 @@ async def synthesize_stream_pcm(request: Request, req: TTSStreamPcmRequest):
                 text=text, voice=req.voice, language=req.language,
                 instructions=req.instructions,
                 chunk_steps=chunk_steps, max_new_tokens=max_new,
+                seed=req.seed,
             ):
                 if state["cancel"]:
                     break

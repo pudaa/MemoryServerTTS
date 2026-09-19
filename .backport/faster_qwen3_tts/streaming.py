@@ -6,7 +6,7 @@ Yields codec ID chunks during generation instead of collecting all at once.
 CUDA graph usage is identical to non-streaming — same per-step performance.
 """
 import time
-from typing import Generator, Tuple
+from typing import Generator, Optional, Tuple
 
 import torch
 
@@ -33,6 +33,7 @@ def fast_generate_streaming(
     do_sample: bool = True,
     repetition_penalty: float = 1.05,
     chunk_size: int = 12,
+    generator: Optional[torch.Generator] = None,
 ) -> Generator[Tuple[torch.Tensor, dict], None, None]:
     """
     Streaming autoregressive generation with CUDA-graphed predictor and talker.
@@ -40,6 +41,9 @@ def fast_generate_streaming(
     Yields (codec_chunk, timing_info) tuples every chunk_size steps.
     codec_chunk: [chunk_steps, 16] tensor of codec IDs.
     The final chunk may be shorter than chunk_size.
+
+    `generator`（backport 扩展）：显式随机源，用于让同一输入可复现。
+    不传则沿用全局 RNG（原行为）。
     """
     eos_id = config.codec_eos_token_id
     vocab_size = config.vocab_size
@@ -87,6 +91,7 @@ def fast_generate_streaming(
         do_sample=do_sample,
         suppress_mask=suppress_mask,
         suppress_tokens=[eos_id] if suppress_eos else None,
+        generator=generator,
     )
 
     prefill_len = talker_graph.prefill_kv(talker_past_kv)
@@ -149,6 +154,7 @@ def fast_generate_streaming(
             do_sample=do_sample,
             suppress_mask=suppress_mask,
             suppress_tokens=[eos_id] if suppress_eos else None,
+            generator=generator,
         )
         past_hidden = hidden_states[:, -1:, :].clone()
         gen_step += 1
