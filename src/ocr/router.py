@@ -1,5 +1,5 @@
 """OCR 模块路由 —— 图片/文档文字识别 API"""
-import os, tempfile
+import asyncio, os, tempfile
 from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from src.ocr.engine import OCREngine, SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_DOC_EXTENSIONS
@@ -26,10 +26,14 @@ async def ocr_scan_image(request: Request, image: UploadFile = File(...), langua
     engine: OCREngine = request.app.state.ocr_engine
     cfg: OCRConfig = request.app.state.ocr_config
     if language and language != cfg.lang:
-        cfg.lang = language; engine.reload()
+        cfg.lang = language
+        # reload 也是阻塞的（重建推理会话），同样放线程池
+        await asyncio.to_thread(engine.reload)
     try:
-        if not engine.ready: engine.load()
-        result = engine.predict_image(tmp)
+        # 与 ASR 同理：OCR 推理是阻塞的，直接在事件循环里跑会拖住流式 TTS 的分片发送。
+        if not engine.ready:
+            await asyncio.to_thread(engine.load)
+        result = await asyncio.to_thread(engine.predict_image, tmp)
         if not result.get("success"): raise HTTPException(status_code=500, detail=result.get("error", "OCR failed"))
         return result
     except HTTPException: raise
@@ -51,10 +55,13 @@ async def ocr_scan_document(request: Request, file: UploadFile = File(...), lang
     engine: OCREngine = request.app.state.ocr_engine
     cfg: OCRConfig = request.app.state.ocr_config
     if language and language != cfg.lang:
-        cfg.lang = language; engine.reload()
+        cfg.lang = language
+        await asyncio.to_thread(engine.reload)
     try:
-        if not engine.ready: engine.load()
-        result = engine.predict_pdf(tmp) if ext == ".pdf" else engine.predict_image(tmp)
+        if not engine.ready:
+            await asyncio.to_thread(engine.load)
+        fn = engine.predict_pdf if ext == ".pdf" else engine.predict_image
+        result = await asyncio.to_thread(fn, tmp)
         if not result.get("success"): raise HTTPException(status_code=500, detail=result.get("error", "OCR failed"))
         return result
     except HTTPException: raise

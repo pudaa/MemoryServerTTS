@@ -29,6 +29,24 @@ _server_logger = get_logger("SERVER")
 app = FastAPI(title="MemoryServerTTS API", version="1.0.0")
 app.state.model_lock = asyncio.Lock()
 
+
+async def _event_loop_lag_monitor(interval: float = 0.25, warn_ms: float = 300.0):
+    """事件循环卡顿监测（服务内部自测，排除客户端干扰）。
+
+    为什么需要：ASR/OCR 的处理器是 `async def` 但内部调用**阻塞**推理，
+    会把事件循环占住，导致同时进行的流式 TTS 分片发不出去
+    （实测：ASR 跑 4.2s 期间健康接口延迟 3.7s，而空闲时只有 17ms）。
+    这个心跳把"事件循环被占用多久"直接量化到日志里，便于判断与回归。
+    """
+    import time as _t
+    loop = asyncio.get_running_loop()
+    while True:
+        t0 = _t.perf_counter()
+        await asyncio.sleep(interval)
+        lag = (_t.perf_counter() - t0 - interval) * 1000
+        if lag >= warn_ms:
+            _server_logger.warning(f"[EVLOOP] 事件循环卡顿 {lag:.0f}ms")
+
 app.include_router(tts_router)
 app.include_router(asr_router)
 app.include_router(pronunciation_router)
@@ -52,6 +70,8 @@ async def startup_event():
     app.state.ocr_config = OCRConfig()
     app.state.ocr_engine = OCREngine(config=app.state.ocr_config)
     app.state.ocr_engine.load()
+    # 事件循环卡顿监测（见 _event_loop_lag_monitor 说明）
+    app.state.lag_task = asyncio.create_task(_event_loop_lag_monitor())
 
 
 # ── TTS WebSocket (保留在主文件) ──

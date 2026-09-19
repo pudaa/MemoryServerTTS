@@ -1,5 +1,5 @@
 """Pronunciation 模块路由 —— 发音评价 API"""
-import os, tempfile
+import asyncio, os, tempfile
 from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
@@ -41,7 +41,12 @@ async def score_pronunciation(request: Request, student_audio: UploadFile = File
     with tempfile.NamedTemporaryFile(delete=False, suffix=Path(reference_audio.filename).suffix) as tf:
         tf.write(await reference_audio.read()); ref_path = tf.name
     try:
-        result = request.app.state.pronunciation_evaluator.pronunciation_score(student_audio=student_path, reference_audio=ref_path)
+        # 阻塞调用放线程池：MFCC+DTW 是纯 CPU 计算（音素评测还会调 ASR），
+        # 直接在事件循环里跑会拖住流式 TTS 的分片发送（与 ASR/OCR 同理）。
+        result = await asyncio.to_thread(
+            request.app.state.pronunciation_evaluator.pronunciation_score,
+            student_audio=student_path, reference_audio=ref_path,
+        )
         return result
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
     finally: _cleanup(student_path); _cleanup(ref_path)
@@ -49,7 +54,9 @@ async def score_pronunciation(request: Request, student_audio: UploadFile = File
 @router.post("/batch-score")
 async def batch_score_pronunciation(request: Request, req: list[PronunciationPair]):
     pairs = [{"student": p.student, "reference": p.reference} for p in req]
-    return {"results": request.app.state.pronunciation_evaluator.batch_pronunciation_score(pairs)}
+    results = await asyncio.to_thread(
+        request.app.state.pronunciation_evaluator.batch_pronunciation_score, pairs)
+    return {"results": results}
 
 @router.post("/phoneme-score")
 async def phoneme_score(request: Request, student_audio: UploadFile = File(...), reference_text: str = Form(...), language: str | None = Form(None)):
@@ -72,7 +79,11 @@ async def phoneme_score(request: Request, student_audio: UploadFile = File(...),
     except HTTPException: raise
     except Exception as e: _cleanup(tmp); raise HTTPException(status_code=400, detail=f"Invalid audio: {e}")
     try:
-        result = request.app.state.phoneme_evaluator.evaluate(audio_path=audio_to_use, reference_text=reference_text, language=language)
+        # 音素评测内部会调 ASR（阻塞），同样放线程池
+        result = await asyncio.to_thread(
+            request.app.state.phoneme_evaluator.evaluate,
+            audio_path=audio_to_use, reference_text=reference_text, language=language,
+        )
         return _snake_to_camel(result)
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -83,7 +94,9 @@ async def phoneme_score(request: Request, student_audio: UploadFile = File(...),
 @router.post("/phoneme-batch-score")
 async def phoneme_batch_score(request: Request, req: list[PhonemeScoreRequest]):
     pairs = [{"audio": item.audio, "reference_text": item.reference_text} for item in req]
-    return {"results": request.app.state.phoneme_evaluator.batch_evaluate(pairs)}
+    results = await asyncio.to_thread(
+        request.app.state.phoneme_evaluator.batch_evaluate, pairs)
+    return {"results": results}
 
 @router.post("/phoneme-score-with-text")
 async def phoneme_score_with_text(request: Request, student_audio: UploadFile = File(...), reference_text: str = Form(...), language: str | None = Form(None)):
