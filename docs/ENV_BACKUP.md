@@ -123,5 +123,6 @@ git revert a439b8b          # 保留历史
 git reset --hard 708924d    # 彻底回到调研前（会丢弃之后的提交）
 ```
 
-> 注意 `.gitignore` 里 `tests/`、`.github/`、`.vscode/`、`.workbuddy/`、`models/` 均被忽略，
-> 这些内容**不在 git 备份范围内**（`tests/` 里有 50 个单测，别以为 git 能救回来）。
+> 注意 `.gitignore` 里 `.github/`、`.vscode/`、`.workbuddy/`、`models/` 均被忽略，
+> 这些内容**不在 git 备份范围内**。
+> `tests/` 曾同样被忽略，现已重新纳入版本控制（约 50 个单测，此前只存在于本机磁盘）。

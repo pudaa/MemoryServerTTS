@@ -1,0 +1,78 @@
+# 换行符与文件类型策略
+#
+# 背景：此前仓库没有 .gitattributes，Windows 上 core.autocrlf=true 会让
+# `git add` 反复提示 "LF will be replaced by CRLF"，且工作区换行符取决于
+# 克隆者的本地配置 —— 同一份代码在不同机器上内容不一致。
+#
+# 策略：仓库与工作区统一 LF（跨平台确定性，Docker / Linux 部署不受 CRLF 影响）；
+# 仅 Windows 专有脚本强制 CRLF；二进制文件禁止任何转换与文本 diff。
+#
+# 注意：规则按「后匹配者生效」解析，因此通用规则在前、特例在后。
+
+# 默认：由 Git 判定是否为文本，文本一律 LF
+* text=auto eol=lf
+
+# ---- 文本（显式声明，避免 auto 误判）----
+*.py             text eol=lf
+*.pyi            text eol=lf
+*.md             text eol=lf
+*.rst            text eol=lf
+*.txt            text eol=lf
+*.json           text eol=lf
+*.jsonl          text eol=lf
+*.yaml           text eol=lf
+*.yml            text eol=lf
+*.toml           text eol=lf
+*.ini            text eol=lf
+*.cfg            text eol=lf
+*.html           text eol=lf
+*.css            text eol=lf
+*.js             text eol=lf
+*.ts             text eol=lf
+*.svg            text eol=lf
+*.sh             text eol=lf
+*.bash           text eol=lf
+Dockerfile       text eol=lf
+requirements.txt text eol=lf
+.gitignore       text eol=lf
+.gitattributes   text eol=lf
+
+# ---- Windows 专有脚本：必须 CRLF ----
+*.bat            text eol=crlf
+*.cmd            text eol=crlf
+*.ps1            text eol=crlf
+
+# ---- 二进制：禁止换行转换与文本 diff ----
+# 音频（基准脚本产出，不入库；此处防止误 force-add）
+*.wav            binary
+*.mp3            binary
+*.flac           binary
+*.ogg            binary
+# 模型权重
+*.pt             binary
+*.pth            binary
+*.onnx           binary
+*.gguf           binary
+*.safetensors    binary
+*.bin            binary
+*.h5             binary
+# 数据 / 序列化
+*.npy            binary
+*.npz            binary
+*.pkl            binary
+# 图片
+*.png            binary
+*.jpg            binary
+*.jpeg           binary
+*.gif            binary
+*.ico            binary
+# 归档 / 可执行 / 编译产物
+*.zip            binary
+*.tar            binary
+*.gz             binary
+*.7z             binary
+*.whl            binary
+*.so             binary
+*.dll            binary
+*.exe            binary
+*.pyc            binary

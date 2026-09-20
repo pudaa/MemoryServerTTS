@@ -8,7 +8,6 @@ __pycache__/
 .venv/
 venv*/
 .env
-tests/
 
 # VSCode
 .vscode/
@@ -35,6 +34,10 @@ temp/
 *.swp
 .workbuddy/
 
+# 提交信息草稿（历史上多次误入库：.cm5.txt / .cm7.txt / .commitmsg3.txt）
+.cm*.txt
+.commitmsg*.txt
+
 # numba JIT 缓存（librosa 依赖；见 bench/README.md：目录不可写会导致 import qwen_tts 卡死）
 .numba-cache/
 
@@ -47,6 +50,8 @@ bench/ab-out/index.html
 # 对话场景评估：只留指标 JSON（verify.json），音频不入库
 bench/conv-out/*.wav
 bench/prof-out/
+# 改造前的 perf 环境 pip freeze 快照（含本机绝对路径；环境信息见 docs/ENV_BACKUP.md）
+bench/perf-env-before-faster.txt
 
 # 测试脚本产出的音频
 test_emotion_output.wav

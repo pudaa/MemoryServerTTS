@@ -87,7 +87,7 @@ MemoryServerTTS/
 ├── requirements.txt                # Python 依赖清单
 ├── Dockerfile                      # Docker 容器化配置
 ├── README.md                       # 项目简介
-├── "# environment.yml"             # Conda 环境定义（memory-tts）
+├── environment.yml                 # Conda 环境定义（memory-tts）
 ├── config/                         # 模块配置（YAML，TTSConfig/OCRConfig 读取）
 │   ├── tts.yaml                    # TTS 配置：模型/解码策略/校验闭环/词库缓存
 │   └── ocr.yaml                    # OCR 配置
