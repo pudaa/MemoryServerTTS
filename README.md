@@ -53,8 +53,8 @@ MemoryServerTTS/
 | `GET` | `/api/v1/health` | 系统 | 健康检查 |
 | `GET` | `/admin` | 面板 | 管理后台（含词库管理） |
 | `GET` | `/api/v1/tts/voices` | TTS | 音色列表 |
-| `POST` | `/api/v1/tts/synthesize` | TTS | 文本合成语音 |
-| `WS` | `/api/v1/tts/stream` | TTS | 流式合成 |
+| `POST` | `/api/v1/tts/synthesize` | TTS | 文本合成语音（整段 WAV） |
+| `POST` | `/api/v1/tts/synthesize-stream` | TTS | 🔥 流式合成（裸 PCM，首片 ~0.5s，对话朗读用） |
 | `GET` | `/api/v1/dictation/audio` | 词库 | 🔥 听写单词音频（缓存感知） |
 | `POST` | `/api/v1/dictation/pregenerate` | 词库 | 🔥 批量预生成（管理端） |
 | `POST` | `/api/v1/asr/transcribe` | ASR | 语音转文字 |

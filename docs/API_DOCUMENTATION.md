@@ -135,7 +135,7 @@ docker run -d -p 8000:8000 --gpus all memory-tts
 | `GET` | `/api/v1/health` | 健康检查 |
 | `GET` | `/api/v1/tts/voices` | 获取所有可用音色 |
 | `POST` | `/api/v1/tts/synthesize` | 文本合成语音（返回 WAV 文件） |
-| `WebSocket` | `/api/v1/tts/stream` | 流式语音合成 |
+| `POST` | `/api/v1/tts/synthesize-stream` | 🔥 流式合成（裸 PCM 音频流，首片 ~0.5s） |
 | `POST` | `/api/v1/tts/clone` | 音色克隆（当前为模拟实现） |
 | `GET` | `/api/v1/dictation/audio` | 🔥 听写单词音频（缓存感知，命中即回） |
 | `GET` | `/api/v1/dictation/words` | 词库缓存条目列表（管理员） |
@@ -282,26 +282,30 @@ byte[] audioBytes = webClient.post()
 
 ---
 
-### 4.2 流式合成（WebSocket）
+### 4.2 流式合成（HTTP 音频流，推荐）
 
-`WebSocket /api/v1/tts/stream`
+`POST /api/v1/tts/synthesize-stream`
 
-适用于长文本或实时性要求高的场景，通过 WebSocket 分块发送文本，服务端返回 PCM16 编码的音频块。
+适用于长文本、实时性要求高的场景（AI 对话朗读、每日一读）。
+服务端**边生成边下发裸 PCM**，客户端可边收边播，**首片约 0.5s**，
+且首片延迟与文本长度无关。
 
-#### 连接地址
+> **历史说明**：早期曾有一个 `WebSocket /api/v1/tts/stream`（以及同名的 SSE
+> `POST /api/v1/tts/stream`），因需要客户端自行维护连接与分帧、且 SSE 版本只推
+> `audioUrl` 通知（每片还要再发一次请求下载）而效果不佳，**已于 2026-09 删除**。
+> 请使用本节的 HTTP 音频流端点。
+
+#### 请求
 
 ```
-ws://localhost:8000/api/v1/tts/stream
+POST /api/v1/tts/synthesize-stream
+Content-Type: application/json
 ```
 
-#### 客户端 -> 服务端消息格式
-
-**文本块消息**：
 ```json
 {
-  "type": "text_chunk",
-  "data": "Hello, welcome to Memory English Learning App!",
-  "voice": "Ono_Anna",
+  "text": "Hello, welcome to Memory English Learning App!",
+  "voice": "aiden",
   "language": "English",
   "instructions": "Speak with a happy and encouraging tone."
 }
@@ -309,115 +313,72 @@ ws://localhost:8000/api/v1/tts/stream
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `type` | string | ✅ | 固定为 `"text_chunk"` |
-| `data` | string | ✅ | 要合成的文本 |
-| `voice` | string | ❌ | 音色 ID，默认 `"Ono_Anna"` |
-| `language` | string | ❌ | 语言，默认 `"English"` |
-| `instructions` | string | ❌ | 情感指令 |
+| `text` | string | ✅ | 待合成文本 |
+| `voice` | string | ❌ | 音色 id，缺省按语言自动匹配母语音色 |
+| `language` | string | ❌ | 语言（全名或 ISO 简写），缺省 `English` |
+| `instructions` | string | ❌ | 情感/风格指令（服务端不注入任何指令，见约束 C1） |
+| `chunk_steps` | int | ❌ | 每片帧数，缺省 8（≈640ms 音频/片） |
+| `max_new_tokens` | int | ❌ | 生成上限帧数，缺省取配置 |
 
-**结束消息**：
-```json
-{
-  "type": "end"
-}
+#### 响应
+
+```
+200 OK
+Content-Type: audio/L16;rate=24000;channels=1
+Transfer-Encoding: chunked
+
+X-Audio-Sample-Rate: 24000
+X-Audio-Channels: 1
+X-Audio-Bits: 16
+X-Audio-Format: pcm_s16le
+X-TTS-TTFA-Ms: <服务端实测首片耗时>
+
+body: 原始 int16 小端、单声道 PCM（无头部、无时长）
 ```
 
-发送此消息后，服务端会返回 `end_of_stream` 并关闭连接。
+| 响应头 | 说明 |
+|--------|------|
+| `Content-Type` | `audio/L16;rate=<采样率>;channels=1` |
+| `X-Audio-Sample-Rate` | 采样率（当前 24000） |
+| `X-Audio-Format` | `pcm_s16le` |
+| `X-TTS-TTFA-Ms` | 服务端测得的首片耗时，便于定位链路瓶颈 |
 
-#### 服务端 -> 客户端消息格式
+> ⚠️ **body 是裸 PCM**：没有容器头也没有时长字段。客户端必须按响应头解释；
+> 总时长只能靠累计字节数推断（`字节数 / 2 / 采样率` 秒）。
 
-**音频块消息**：
-```json
-{
-  "type": "audio_chunk",
-  "sample_rate": 24000,
-  "format": "pcm16",
-  "data": "<base64_encoded_pcm_bytes>"
-}
-```
+#### 实测性能（RTX 4060 Laptop 8G，完整服务含 ASR/OCR 同进程）
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `type` | string | 固定为 `"audio_chunk"` |
-| `sample_rate` | int | 音频采样率（如 24000 Hz） |
-| `format` | string | 音频格式，当前为 `"pcm16"`（16-bit 有符号整数 PCM） |
-| `data` | string | Base64 编码的 PCM 音频数据 |
+| 文本 | 首片 | 分片数 | 音频 | 总耗时 | RTF |
+|------|------|--------|------|--------|-----|
+| 短句（23 字符） | ~0.5s | 3 | 1.52s | ~3s | — |
+| 长文本（110 词） | ~0.5s | 61 | 38.6s | ~21s | ~0.55× |
 
-**流结束消息**：
-```json
-{
-  "type": "end_of_stream"
-}
-```
+#### 客户端播放建议
 
-**错误消息**：
-```json
-{
-  "type": "error",
-  "message": "Unsupported message type"
-}
-```
+用 `AudioTrack`（**不是** MediaPlayer/ExoPlayer）边收边写：裸 PCM 没有容器头，
+MediaPlayer/ExoPlayer 都需要容器或自定义 `MediaSource`；而 `AudioTrack` 本身就是
+PCM 字节流接口，且 `write()` 写满缓冲会阻塞 —— 这个背压把读取速度限制在播放速度上，
+因此**内存占用恒定**。Android 端实现见 `Memory` 仓库的
+`AudioPlaybackManager.playStreaming()` / `StreamingAudioSource`。
 
-#### SpringBoot WebSocket 客户端示例
+#### 客户端示例（OkHttp，示意）
 
 ```java
-import org.springframework.web.socket.*;
-import org.springframework.web.socket.client.standard.StandardWebSocketClient;
-import java.net.URI;
-import java.util.Base64;
-import javax.sound.sampled.*;
-
-public class TtsWebSocketClient {
-
-    public static void main(String[] args) throws Exception {
-        StandardWebSocketClient client = new StandardWebSocketClient();
-        WebSocketSession session = client.doHandshake(
-            new WebSocketHandler() {
-                @Override
-                public void afterConnectionEstablished(WebSocketSession session) {
-                    System.out.println("WebSocket connected.");
-
-                    // 发送文本块
-                    String message = """
-                        {
-                            "type": "text_chunk",
-                            "data": "Hello, welcome to Memory English Learning App!",
-                            "voice": "Ono_Anna",
-                            "language": "English",
-                            "instructions": "Speak with a happy tone."
-                        }
-                        """;
-                    session.sendMessage(new TextMessage(message));
-
-                    // 发送结束信号
-                    session.sendMessage(new TextMessage("{\"type\": \"end\"}"));
-                }
-
-                @Override
-                public void handleMessage(WebSocketSession session, WebSocketMessage<?> message) {
-                    String payload = (String) message.getPayload();
-                    // 解析 JSON...
-                    // 如果是 audio_chunk，解码 data 字段得到 PCM 音频数据
-                }
-
-                @Override
-                public void handleTransportError(WebSocketSession session, Throwable exception) {
-                    exception.printStackTrace();
-                }
-
-                @Override
-                public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) {
-                    System.out.println("Connection closed: " + closeStatus);
-                }
-            },
-            new WebSocketHttpHeaders(),
-            URI.create("ws://localhost:8000/api/v1/tts/stream")
-        ).get();
-    }
+Request req = new Request.Builder()
+        .url(baseUrl + "/tts/synthesize-stream")
+        .header("Authorization", "Bearer " + accessToken)   // 需 JWT
+        .post(RequestBody.create(json, MediaType.get("application/json")))
+        .build();
+try (Response resp = client.newCall(req).execute()) {
+    int sr = Integer.parseInt(resp.header("X-Audio-Sample-Rate", "24000"));
+    InputStream in = resp.body().byteStream();   // 边读边写 AudioTrack
+    // ... 读多少写多少，写完由 AudioTrack 播放
 }
 ```
 
-> **PCM 转 WAV 播放说明**：SpringBoot 端收到 Base64 PCM 数据后，需要自行拼接 WAV 头部或直接使用 `javax.sound.sampled.AudioSystem` 播放。PCM 格式为：16-bit 有符号小端序（signed 16-bit little-endian）、单声道。
+> 注意：该端点受 JWT 保护（`Authorization: Bearer <accessToken>`）。
+> `MediaPlayer` 不在 OkHttp 体系内、不能自动刷新 token，若用它直连需自行处理 401；
+> 用 `AudioTrack` + OkHttp 则天然享受 App 的 401 自动刷新。
 
 ---
 

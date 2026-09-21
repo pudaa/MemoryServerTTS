@@ -59,9 +59,17 @@
 
 ### 关键事实（均已核实）
 
-| 事实 | 位置 |
+> **注（2026-09 更新）**：本文档写于改造**之前**，描述的是当时的状态。
+> 文中提到的早期端点 `POST/WebSocket /api/v1/tts/stream`（SSE + `audioUrl` 通知）
+> **已被删除**——它效果不佳（每片多一次往返），改由 `/synthesize-stream`
+> （裸 PCM 音频流）取代。另外 §1 里"Android 播放器只接受本地文件路径"
+> 等现状也已在后续改造中解决，全链路现已落地（客户端用
+> `AudioPlaybackManager.playStreaming()` + `StreamingAudioSource`）。
+> 保留本文档作为**改造决策的历史记录**。
+
+| 事实（改造前） | 位置 |
 |---|---|
-| MemoryServerTTS **已经有** `/api/v1/tts/stream`（SSE，逐句推 `audioUrl`） | `src/tts/router.py:100` |
+| MemoryServerTTS ~~已经有~~ `/api/v1/tts/stream`（SSE，逐句推 `audioUrl`）——**已删除** | `src/tts/router.py` |
 | 但**没有任何调用方使用它**（三端全仓库搜索 `tts/stream` 无结果） | 搜索确认 |
 | MemoryServer 明确以"前端无法流式播放"为由放弃流式 | `ConversationServiceImpl.java:269` 注释 |
 | Java 侧把**整段 wav 读进 `byte[]`**，无 chunked 转发 | `TTSServiceImpl.java:89-98` |

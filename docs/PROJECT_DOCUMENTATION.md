@@ -933,7 +933,7 @@ def _snake_to_camel(data):
 | `GET` | `/api/v1/health` | — | JSON | — |
 | `GET` | `/api/v1/tts/voices` | — | JSON | — |
 | `POST` | `/api/v1/tts/synthesize` | JSON | audio/wav | ✅ |
-| `WebSocket` | `/api/v1/tts/stream` | JSON 消息帧 | JSON 音频帧 | ✅ |
+| `POST` | `/api/v1/tts/synthesize-stream` | JSON | audio/L16 (chunked PCM) | ✅ |
 | `POST` | `/api/v1/tts/clone` | multipart | JSON | — |
 | `POST` | `/api/v1/asr/transcribe` | multipart | JSON | — |
 | `GET` | `/api/v1/asr/models` | — | JSON | — |
@@ -1010,7 +1010,7 @@ python -m src.dictation.pregenerate --file words.csv --best-of 5
 | 1 | `GET` | `/api/v1/health` | 健康检查 | — | JSON |
 | 2 | `GET` | `/api/v1/tts/voices` | 音色列表 | — | JSON |
 | 3 | `POST` | `/api/v1/tts/synthesize` | 文本合成 WAV | JSON | binary/WAV |
-| 4 | `WS` | `/api/v1/tts/stream` | 流式合成 | WebSocket JSON | WebSocket JSON |
+| 4 | `POST` | `/api/v1/tts/synthesize-stream` | 流式合成（裸 PCM） | JSON | audio/L16 chunked |
 | 5 | `POST` | `/api/v1/tts/clone` | 音色克隆(模拟) | multipart | JSON |
 | 6 | `POST` | `/api/v1/asr/transcribe` | 语音转录 | multipart | JSON |
 | 7 | `GET` | `/api/v1/asr/models` | ASR 模型列表 | — | JSON |
@@ -1115,73 +1115,51 @@ curl -X POST http://localhost:8000/api/v1/tts/synthesize \
   --output output.wav
 ```
 
-#### 5.2.2 流式合成（WebSocket）
+#### 5.2.2 流式合成（HTTP 音频流，推荐）
 
-`WebSocket /api/v1/tts/stream`
+`POST /api/v1/tts/synthesize-stream`
 
-适用于长文本或需要低延迟首字响应的场景。通过 WebSocket 分块发送文本，服务端实时返回 PCM16 音频块。
+适用于长文本或需要低延迟首字响应的场景：服务端**边生成边下发裸 PCM**，
+客户端边收边播，**首片约 0.5s**（且与文本长度无关）。
 
-**连接地址**：`ws://localhost:8000/api/v1/tts/stream`
+> 早期曾有 `WebSocket /api/v1/tts/stream` 与同名 SSE 端点，因需客户端自行维护连接
+> 与分帧、且 SSE 版本只推 `audioUrl` 通知（每片还要再发一次请求下载）而效果不佳，
+> **已于 2026-09 删除**。
 
-**客户端 → 服务端（文本块）**：
+**请求**：
 
 ```json
+POST /api/v1/tts/synthesize-stream
 {
-  "type": "text_chunk",
-  "data": "Hello, welcome to Memory English Learning App!",
+  "text": "Hello, welcome to Memory English Learning App!",
   "voice": "aiden",
   "language": "English",
-  "instructions": "Speak with a happy tone."
+  "instructions": "Speak with a happy and encouraging tone."
 }
 ```
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `type` | string | ✅ | 固定为 `"text_chunk"` |
-| `data` | string | ✅ | 待合成文本片段 |
-| `voice` | string | ❌ | 音色 ID，默认 `"aiden"`（英文） |
-| `language` | string | ❌ | 语言，默认 `"English"` |
-| `instructions` | string | ❌ | 情感指令 |
+**响应**：
 
-**客户端 → 服务端（结束信号）**：
+```
+200 OK
+Content-Type: audio/L16;rate=24000;channels=1
+Transfer-Encoding: chunked
+X-Audio-Sample-Rate: 24000
+X-Audio-Bits: 16
+X-Audio-Format: pcm_s16le
+X-TTS-TTFA-Ms: <服务端实测首片耗时>
 
-```json
-{ "type": "end" }
+body: 原始 int16 小端、单声道 PCM（无头部、无时长）
 ```
 
-**服务端 → 客户端（音频块）**：
+> ⚠️ body 是**裸 PCM**：客户端必须按响应头解释，总时长只能靠累计字节数推断。
 
-```json
-{
-  "type": "audio_chunk",
-  "sample_rate": 24000,
-  "format": "pcm16",
-  "data": "<base64_encoded_pcm_bytes>"
-}
-```
+**客户端播放**：用 `AudioTrack` 边收边写（裸 PCM 无容器头，MediaPlayer/ExoPlayer
+需要容器或自定义 MediaSource）。Android 端见 `Memory` 仓库的
+`AudioPlaybackManager.playStreaming()` / `StreamingAudioSource`。
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `type` | string | `"audio_chunk"` |
-| `sample_rate` | int | 采样率（Hz） |
-| `format` | string | `"pcm16"`（16-bit 有符号小端序 PCM） |
-| `data` | string | Base64 编码的 PCM 音频数据 |
-
-**PCM 数据解码**（Java）：
-```java
-byte[] pcmBytes = Base64.getDecoder().decode(base64Data);
-// PCM 16-bit 小端序 → 可保存为 WAV 或直接播放
-// WAV 文件 = 44字节头部 + PCM 数据
-```
-
-**服务端 → 客户端（结束/错误）**：
-
-```json
-{ "type": "end_of_stream" }
-{ "type": "error", "message": "错误描述" }
-```
-
----
+**实测**（RTX 4060 Laptop 8G，完整服务含 ASR/OCR 同进程）：
+短句首片 ~0.5s；110 词长文本首片 ~0.5s、61 分片、RTF ~0.55×。
 
 ### 5.3 ASR 语音识别
 
@@ -1426,7 +1404,7 @@ graph TB
         DICT["DictationService<br/>听写练习"]
     end
     subgraph "MemoryServerTTS (Python FastAPI :8000)"
-        TTS_API["/tts/synthesize<br/>/tts/stream"]
+        TTS_API["/tts/synthesize<br/>/tts/synthesize-stream"]
         ASR_API["/asr/transcribe"]
         PHON_API["/pronunciation/phoneme-score"]
     end
