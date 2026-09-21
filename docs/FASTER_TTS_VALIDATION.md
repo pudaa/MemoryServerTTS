@@ -5,6 +5,23 @@
 
 ---
 
+## 0. ★ 当前落地状态（2026-09-21 更新，**先读这一节**）
+
+| 项 | 状态 |
+|---|---|
+| 代码 | ✅ 在仓库（`.backport/` + `src/tts/model_loader.py` 的 `backend` 分支） |
+| 验证 | ✅ 独立进程 + **完整服务端到端**都已实测（见 §10） |
+| **默认是否启用** | ✅ **已启用**：`config/tts.yaml` 的 `backend: faster`、`model_path: ./models/qwen-0.6b` |
+| 服务端到端实测 | ✅ 首片 **~0.5s**、长文本 61 分片、峰显存 **3532 MiB / 8188 MiB** |
+
+> **历史说明（避免误读）**：本文档 §1–§9 写于**尚未落地**时——当时 `backend` 默认是
+> `upstream`，加速只在**独立进程**里验证过，**服务里从未生效**。
+> 后续落地过程与完整服务实测见 **§10**。
+> 如果你（或另一个 agent）在旧版本里读到"未接入服务 / 未落地"，那读得没错——
+> 是本文档早期版本的叙述容易让人误以为已经生效。
+
+---
+
 ## 1. 一句话结论
 
 用 `faster-qwen3-tts` 的 **CUDA Graph + 静态 KV cache** 替换上游的动态 KV 解码循环，
@@ -263,11 +280,89 @@ $env:HF_HUB_OFFLINE = "1"
 
 - **未做人工试听**：音质结论基于 ASR 回读（7 case 词级 WER）+ 波形客观量，
   **不能替代人耳**；音色一致性、韵律、流式拼接感仍需人确认。
-- **未接入服务**：本报告只验证了独立进程内的性能，未改任何服务代码，
-  也未验证在 `model_lock` 与 ASR/OCR 同进程并发下的表现。
+- **未接入服务**（**注：此局限已于 §10 解决**）：本报告早期只验证了独立进程内的性能，
+  当时未改任何服务代码，也未验证在 `model_lock` 与 ASR/OCR 同进程下的表现。
 - **首次测量偏高未定位**：16–19s 的初测无法复现，已废弃但不掩埋。
 - **上游未修**：`transformers>=5.15.1` 的上界问题、4.x 兼容性都还没进上游；
   backport 是我们自己维护的副本，上游升级后需要重新评估（见 `.backport` 内注释）。
 - **样本量**：7 个 case + 若干重复；覆盖 1 词到 3 句，但只用了 `aiden` 单个音色、
   单一 language=English，**未测中文与其他音色**。
 - **只测了 Torch/CUDA-graph 后端**：GGML（qwentts.cpp）后端与纯 C 引擎路线未实测。
+
+---
+
+## 10. ★ 落地记录（2026-09-21）
+
+### 10.1 为什么之前"验证了却没生效"
+
+`config/tts.yaml` 的 `backend` 默认是 `upstream`，而 `_load_model()` 里
+`if cfg.backend == "faster"` 才走 CUDA Graph 分支。所以：
+
+- **加速的 4–5 倍是真的**，但测的是**独立进程里直接调模型**；
+- **线上服务一直跑的是 upstream**（动态 KV），加速从未生效。
+
+根因是**叙述问题**：报告标题写"验证报告"、结论写"可行"，
+但"默认未启用"这个前提没有在每次给结论时重复。**我把验证讲成了落地。**
+
+### 10.2 落地改动
+
+| 文件 | 改动 |
+|---|---|
+| `config/tts.yaml` | `backend: upstream` → **`faster`**；`model_path` 1.7B → **`./models/qwen-0.6b`** |
+| `src/tts/model_loader.py` | 修 **upstream 回退分支的 bug**（见 10.4） |
+
+为什么默认换 0.6B：实测 1.7B 只快约 1.2 倍差距很小（瓶颈在 Predictor），
+而 0.6B **省约 2GB 显存**，与 ASR/OCR 同进程更安全。
+需要 `instruct` 的场景（听写词库）显式切回 1.7B 即可。
+
+### 10.3 完整服务端到端实测（**首次做**）
+
+之前所有数字都来自独立进程；这次起**完整服务**（TTS + ASR + OCR 同进程、同卡）。
+
+| 方案 | 短句首片 | 长文本(110词) | 分片 | 音频 | 总耗时 | RTF_wall | 峰值显存 |
+|---|---|---|---|---|---|---|---|
+| **faster / 0.6B（已落地）** | **502–548 ms** | **502–548 ms** | **61** | 38.56 s | 21.8 s | **~0.566×** | **3532 MiB** |
+| upstream / 0.6B（原线上） | 7256–7987 ms | **504 超时** | 1 | — | 65 s 后失败 | — | ~2991 MiB |
+
+- **首片提升约 14–15 倍**（7.9s → 0.5s）
+- **upstream 长文本直接不可用**：它"整段生成后单片返回"，577 字符超过 router 的
+  60s 首片超时 → **504**。也就是说**联调长回复时 upstream 根本过不去**。
+- 显存 **3532 / 8188 MiB**，余量约 4.6 GB，与 ASR(≈1GB) + OCR(≈0.5GB) 共存安全。
+- 启动约 12s（CUDA Graph 捕获 2.7s），无 OOM。
+
+### 10.4 落地过程中发现并修掉的 bug
+
+`generate_stream()` 的 **upstream 回退分支写错了对象**：
+
+```python
+inner = getattr(self.model, "model", self.model)   # ← upstream 时取到裸模型
+wavs, sr = inner.generate_custom_voice(...)        # ← 裸模型没这方法 → 500
+```
+
+upstream 时 `self.model` 本身就是带 `generate_custom_voice` 的 `Qwen3TTSModel`，
+而 `.model` 是内部的 `Qwen3TTSForConditionalGeneration`（**没有**该方法）。
+已改为"谁有能力用谁"的解析，并在都不可用时抛明确错误。
+
+> 这个 bug 只影响 **upstream 回退路径**（faster 路径不受影响），
+> 所以之前独立进程测 faster 时完全没暴露——**又一个"没在完整服务里测"的代价**。
+
+### 10.5 复现方式
+
+```powershell
+# 不需要任何环境变量，配置即生效
+cd D:\Codes\MemoryServerTTS
+python main.py
+# 日志应出现：[faster] 加载 CUDA Graph 后端: ./models/qwen-0.6b
+python bench/probe_chain.py --url http://127.0.0.1:8000/api/v1/tts/synthesize-stream --repeat 2
+```
+
+切换回 1.7B（听写需要 instruct 时）：
+`$env:QWEN_TTS_MODEL_PATH="./models/qwen-1.7b"` 或改 `config/tts.yaml`。
+
+### 10.6 仍未验证
+
+- **人工试听**：加速后的音色/韵律未由人耳确认（ASR 回读与波形指标 OK）。
+- **Android 真机**：客户端直连播放那条线未在设备上跑过。
+- **`/api/v1/health` 未暴露实际 backend**：目前只能从日志判断，
+  建议后续补上（否则"到底开没开"又要翻代码——正是这次踩的坑）。
+- 未测中文与其他音色。

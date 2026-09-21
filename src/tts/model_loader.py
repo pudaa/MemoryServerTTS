@@ -499,8 +499,19 @@ class TTSModelManager:
                 "当前后端不支持真正的流式生成（upstream），整段生成后单片返回；"
                 "如需低首片延迟请设置 tts.backend=faster"
             )
-            inner = getattr(self.model, "model", self.model)
-            wavs, sr = inner.generate_custom_voice(
+            # 注意：upstream 时 self.model 本身就是 Qwen3TTSModel（带 generate_custom_voice），
+            # 而 self.model.model 是内部的裸模型 Qwen3TTSForConditionalGeneration（**没有**
+            # 该方法）。此前写成 getattr(self.model, "model", self.model) 会取到裸模型并
+            # 抛 AttributeError → 端点 500。这里按"谁有能力用谁"来解析。
+            gen_fn = getattr(self.model, "generate_custom_voice", None)
+            target = self.model if callable(gen_fn) else getattr(self.model, "model", None)
+            gen_fn = getattr(target, "generate_custom_voice", None) if target is not None else None
+            if not callable(gen_fn):
+                raise RuntimeError(
+                    f"当前后端无法整段生成（{type(self.model).__name__} 既无流式 API "
+                    f"也无 generate_custom_voice）；请检查 tts.backend 配置"
+                )
+            wavs, sr = gen_fn(
                 text=t, language=language, speaker=voice, instruct=ins,
                 non_streaming_mode=True,
                 max_new_tokens=min(max_new, 2048),

@@ -18,16 +18,25 @@
 
 tts:
   # ── 推理后端 ──
-  # upstream — 上游 qwen_tts 动态 KV（原行为，兼容性最好）
-  # faster   — .backport/faster_qwen3_tts 的 CUDA Graph + 静态 KV cache
-  #            实测 RTF_wall 2.25x -> 0.58x（约 4-5 倍），TTFA ~0.33s
+  # upstream — 上游 qwen_tts 动态 KV
+  #            注意：该后端**没有真正的流式能力**，流式端点只能"整段生成后单片返回"，
+  #            长文本会超过首片超时（实测 577 字符 → 504）。仅作降级兜底。
+  # faster   — .backport/faster_qwen3_tts 的 CUDA Graph + 静态 KV cache（**默认**）
   #            依赖 .backport/ 存在；不可用时自动回退 upstream
-  backend: upstream
+  #
+  # 实测（RTX 4060 Laptop 8G，完整服务含 ASR/OCR 同进程，见 §落地验证）：
+  #   faster / 0.6B : 首片 424ms，长文本 61 分片，RTF_wall 0.530x，峰值显存 3123 MiB
+  #   upstream/0.6B : 首片 7965ms（短句），长文本直接 504 超时
+  backend: faster
 
   # ── 模型 ──
   engine: sdpa                    # sdpa | flash_attention_2
   dtype: bfloat16                 # bfloat16 | float32 (float16 不兼容)
-  model_path: ./models/qwen-1.7b  # 空则用环境变量 QWEN_TTS_MODEL_PATH
+  # chat 朗读用 0.6B：实测比 1.7B 快约 20-25%，且省约 2GB 显存，
+  # 与 ASR/OCR 同进程共存更安全（完整服务峰值 3123 MiB / 8188 MiB）。
+  # 需要 instruct 风格控制的场景（听写词库预生成）请显式切回 1.7B：
+  #   QWEN_TTS_MODEL_PATH=./models/qwen-1.7b  或改回本行
+  model_path: ./models/qwen-0.6b
 
   # ── 降级模型 ──
   fallback_model_path: ./models/qwen-0.6b

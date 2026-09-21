@@ -32,6 +32,7 @@ def probe_once(url, text, timeout=300.0):
 
     t0 = time.perf_counter()
     s = socket.create_connection((host, port), timeout=timeout)
+    s.settimeout(timeout)   # 逐次 recv 也用同一超时（upstream 整段生成时首字节可能十几秒）
     s.sendall(
         f"POST {path} HTTP/1.1\r\nHost: {host}:{port}\r\n"
         f"Content-Type: application/json\r\nContent-Length: {len(payload)}\r\n"
