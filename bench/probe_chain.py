@@ -24,7 +24,7 @@ LONG = (
 )
 
 
-def probe_once(url, text, timeout=300.0):
+def probe_once(url, text, timeout=300.0, token=None):
     u = urlparse(url)
     host, port = u.hostname, u.port or 80
     path = u.path + (("?" + u.query) if u.query else "")
@@ -33,9 +33,11 @@ def probe_once(url, text, timeout=300.0):
     t0 = time.perf_counter()
     s = socket.create_connection((host, port), timeout=timeout)
     s.settimeout(timeout)   # 逐次 recv 也用同一超时（upstream 整段生成时首字节可能十几秒）
+    auth_line = f"Authorization: Bearer {token}\r\n" if token else ""
     s.sendall(
         f"POST {path} HTTP/1.1\r\nHost: {host}:{port}\r\n"
         f"Content-Type: application/json\r\nContent-Length: {len(payload)}\r\n"
+        f"{auth_line}"
         f"Connection: close\r\n\r\n".encode() + payload
     )
 
@@ -124,6 +126,7 @@ def main():
     ap.add_argument("--label", default="")
     ap.add_argument("--repeat", type=int, default=2)
     ap.add_argument("--long-only", action="store_true")
+    ap.add_argument("--token", default=None, help="带 Bearer 头（Java 侧端点需要 JWT）")
     args = ap.parse_args()
 
     cases = [("长文本(110词)", LONG)] if args.long_only else [("短句", SHORT), ("长文本(110词)", LONG)]
@@ -135,7 +138,7 @@ def main():
     for cname, text in cases:
         for i in range(args.repeat):
             try:
-                r = probe_once(args.url, text)
+                r = probe_once(args.url, text, token=args.token)
                 ttfa = f"{r['ttfa_ms']:.0f}ms" if r["ttfa_ms"] is not None else "N/A"
                 srv = f"{r['server_ttfa']}ms" if r["server_ttfa"] else "-"
                 print(f"{cname:16s} {r['status'][9:]:>10s} {ttfa:>9s} {srv:>10s} "
