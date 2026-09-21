@@ -74,7 +74,12 @@ async def startup_event():
     app.state.lag_task = asyncio.create_task(_event_loop_lag_monitor())
 
 
-# ── TTS WebSocket (保留在主文件) ──
+# ── TTS WebSocket（已弃用，见下方说明）──
+# ⚠️ DEPRECATED：这是早期的流式实现，**三端均无调用方**（已全仓搜索确认），
+# 仅历史文档仍引用。它按 text_chunk 收文本、逐段回 PCM 音频帧，但：
+#   - 走 WebSocket 需要客户端自己维护连接与分帧，复杂度高；
+#   - 与之等价的 HTTP 音频流 /api/v1/tts/synthesize-stream 更简单、Android 已实装。
+# 保留端点只为不破坏旧文档/外部调用方，后续可安全删除。
 @app.websocket("/api/v1/tts/stream")
 async def websocket_stream(websocket: WebSocket):
     await websocket.accept()

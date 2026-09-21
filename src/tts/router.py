@@ -113,12 +113,25 @@ async def synthesize(request: Request, req: TTSRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/stream")
+@router.post("/stream", deprecated=True)
 async def synthesize_stream(request: Request, req: TTSStreamRequest):
     """
-    流式 TTS：按句子逐块生成音频，通过 SSE 推送每个句子的音频 URL。
-    
-    SSE 事件格式：
+    ⚠️ **已弃用（DEPRECATED），新代码请勿使用。**
+
+    这是**早期**的流式实现，实测效果不佳，已由 `/synthesize-stream` 取代：
+
+    - 它返回的是 **SSE（`text/event-stream`）**，事件里装的是 **`audioUrl`**——
+      即"分片就绪通知"，**不是音频流本身**。客户端每片还要再发一次 HTTP 请求去下载，
+      比直接透传音频流更慢（每片一次往返）。
+    - 而 `/synthesize-stream` 直接下发**裸 PCM**（`audio/L16`），
+      客户端用 AudioTrack 边收边播，首声约 0.5s。
+
+    **已确认三端（MemoryServerTTS / MemoryServer / Memory）无任何调用方**，
+    仅历史文档仍引用。保留端点只为不破坏旧文档/外部调用方，
+    后续可安全删除（连同 `TTSStreamRequest` 与 `server.py` 里同名的
+    WebSocket `/api/v1/tts/stream`）。
+
+    SSE 事件格式（仅存档）：
     - event: chunk    data: {"index": 0, "text": "...", "audioUrl": "...", "duration": 2.5}
     - event: done     data: {"totalChunks": 5, "totalDuration": 12.3}
     - event: error    data: {"message": "..."}
