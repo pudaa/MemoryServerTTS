@@ -6,7 +6,7 @@
   stage 2  codec    : speech_tokenizer.decode() 把语音码还原成波形
 
 结论（2026-09-19，RTX 4060 Laptop 8G）：stage 1 占 96–99%，stage 2 仅 1–4%。
-详见 qwen3-tts-research-report.md §7。
+详见 docs/QWEN3_TTS_RESEARCH_REPORT.md §7。
 
 用法（必须先从项目根目录启动，脚本依赖相对路径 ./models/...）:
 

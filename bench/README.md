@@ -62,4 +62,4 @@ python bench/bench_tts.py --model ./models/qwen-0.6b --repeat 2
 优化方向应指向"每帧 1 次 talker + 15 次串行 code_predictor 前向"的
 Python/kernel-launch 开销（CUDA Graph + 静态 KV cache），而不是声码器。
 
-完整分析见仓库根目录 `qwen3-tts-research-report.md`。
+完整分析见 `docs/QWEN3_TTS_RESEARCH_REPORT.md`。

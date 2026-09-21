@@ -148,8 +148,15 @@ MemoryServerTTS/
     ├── PROJECT_DOCUMENTATION.md    # 本项目完整技术文档（本文件）
     ├── CONSTRAINTS.md              # 🔥 约束与约定文档（架构/模型/接口/性能边界，必读）
     ├── OCR_INTEGRATION.md          # OCR 模块接入说明
+    ├── TROUBLESHOOTING_SPRINGBOOT.md  # SpringBoot 接入排错指南
     ├── phoneme-score-fix.md        # 音素评分接口修复记录
-    └── TROUBLESHOOTING_SPRINGBOOT.md  # SpringBoot 接入排错指南
+    ├── ENV_BACKUP.md               # conda 环境备份与恢复（含回滚点）
+    ├── STREAMING_ARCHITECTURE_ANALYSIS.md  # 流式改造：三端调用链分析 + 方案
+    ├── FASTER_TTS_VALIDATION.md    # CUDA Graph（backport）方案验证报告
+    ├── CONV_SPEED_ASSESSMENT.md    # 对话场景（200 词）速度评估
+    ├── QWEN3_TTS_RESEARCH_REPORT.md        # Qwen3-TTS 状态调研（含本机实测数据）
+    ├── QWEN3TTS_PERF_RESEARCH_2026-09.md   # 性能调研：CUDA Graph 之外还剩多少空间
+    └── TTS_ENGINE_EVAL_2026.md     # 本地 TTS 引擎选型评估
 ```
 
 ---

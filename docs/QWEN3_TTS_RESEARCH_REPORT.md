@@ -758,7 +758,7 @@ that reason, while the conservative default adds ~150 MB.
 
 ## 7. LOCAL GROUND TRUTH — measured on this machine (not sourced from the web)
 
-Measured 2026-09-19 on the actual target hardware. Script: [`bench/bench_tts.py`](bench/bench_tts.py).
+Measured 2026-09-19 on the actual target hardware. Script: [`bench/bench_tts.py`](../bench/bench_tts.py).
 Method: load the checkpoint with the project's own settings (`bf16`, `sdpa`, `device_map=cuda:0`), then call the
 inner `Qwen3TTSForConditionalGeneration.generate()` and `speech_tokenizer.decode()` **separately** and time each
 with `torch.cuda.synchronize()` around it. `RTF = wall_seconds / audio_seconds`, so **RTF > 1 is a slow-down**
@@ -804,7 +804,7 @@ generation. 0.6B → **2 057 MB** allocated / 2 184 MB reserved, peak **2 162 MB
 `librosa.core.notation` → `numba` `@jit(cache=True)` → `numba.core.caching.ensure_cache_path` →
 `tempfile._mkstemp_inner`. numba's default JIT cache directory is not writable from this sandbox, so import
 blocks instead of failing. Setting `NUMBA_CACHE_DIR` to a writable path fixed it: **>420 s → 17.2 s**.
-This is worth hardening in the service (see `bench/README.md`); it also means any timing/startup measurement
+This is worth hardening in the service (see `../bench/README.md`); it also means any timing/startup measurement
 taken without that variable set is meaningless.
 
 ---

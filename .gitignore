@@ -53,5 +53,10 @@ bench/prof-out/
 # 改造前的 perf 环境 pip freeze 快照（含本机绝对路径；环境信息见 docs/ENV_BACKUP.md）
 bench/perf-env-before-faster.txt
 
+# 运行时产出目录（服务启动后自动写入，不入库）
+# tts-audio/：流式与合成输出音频（/tts-audio 静态挂载）；word-cache/：听写词库音频缓存
+tts-audio/
+word-cache/
+
 # 测试脚本产出的音频
 test_emotion_output.wav
