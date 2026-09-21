@@ -3,9 +3,8 @@ MemoryServerTTS API 主入口
 模块化路由: tts / asr / pronunciation / ocr / dashboard
 管理后台: http://localhost:8000/admin
 """
-import asyncio, base64
-import numpy as np
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import asyncio
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from src.tts.router import router as tts_router
@@ -72,38 +71,6 @@ async def startup_event():
     app.state.ocr_engine.load()
     # 事件循环卡顿监测（见 _event_loop_lag_monitor 说明）
     app.state.lag_task = asyncio.create_task(_event_loop_lag_monitor())
-
-
-# ── TTS WebSocket（已弃用，见下方说明）──
-# ⚠️ DEPRECATED：这是早期的流式实现，**三端均无调用方**（已全仓搜索确认），
-# 仅历史文档仍引用。它按 text_chunk 收文本、逐段回 PCM 音频帧，但：
-#   - 走 WebSocket 需要客户端自己维护连接与分帧，复杂度高；
-#   - 与之等价的 HTTP 音频流 /api/v1/tts/synthesize-stream 更简单、Android 已实装。
-# 保留端点只为不破坏旧文档/外部调用方，后续可安全删除。
-@app.websocket("/api/v1/tts/stream")
-async def websocket_stream(websocket: WebSocket):
-    await websocket.accept()
-    try:
-        while True:
-            data = await websocket.receive_json()
-            if data.get("type") == "end":
-                await websocket.send_json({"type": "end_of_stream"}); break
-            if data.get("type") != "text_chunk":
-                await websocket.send_json({"type": "error", "message": "Unsupported message type"}); continue
-            async with app.state.model_lock:
-                wavs, sr, _meta = app.state.model.generate(
-                    text=data["data"], voice=data.get("voice", "aiden"),
-                    language=data.get("language", "English"),
-                    instructions=data.get("instructions"), streaming=True,
-                    verify=False,  # 实时流式不做 ASR 校验
-                )
-            wav = wavs[0]
-            pcm = (wav * 32767.0).clip(-32768, 32767).astype(np.int16).tobytes()
-            await websocket.send_json({"type": "audio_chunk", "sample_rate": sr, "format": "pcm16", "data": base64.b64encode(pcm).decode()})
-    except WebSocketDisconnect:
-        _server_logger.info("WebSocket 客户端断开")
-    except Exception as e:
-        await websocket.send_json({"type": "error", "message": str(e)})
 
 
 # ── 健康检查 ──

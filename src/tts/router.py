@@ -27,14 +27,6 @@ class TTSRequest(BaseModel):
     seed: int | None = None       # 基础随机种子（短文本重试时 seed+i）
     include_meta: bool = False    # True 时返回 JSON（含 verified/attempts/asrText），否则返回 WAV 流
 
-class TTSStreamRequest(BaseModel):
-    text: str
-    voice: str = "aiden"
-    language: str = "English"
-    instructions: str | None = None
-    max_chunk_chars: int = 200
-    verify: bool | None = None    # None/False=默认不校验（流式实时性优先），True=逐块校验
-
 class TTSStreamPcmRequest(BaseModel):
     """流式 PCM 合成请求（对话朗读用，见 docs/STREAMING_ARCHITECTURE_ANALYSIS.md）"""
     text: str
@@ -112,107 +104,6 @@ async def synthesize(request: Request, req: TTSRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/stream", deprecated=True)
-async def synthesize_stream(request: Request, req: TTSStreamRequest):
-    """
-    ⚠️ **已弃用（DEPRECATED），新代码请勿使用。**
-
-    这是**早期**的流式实现，实测效果不佳，已由 `/synthesize-stream` 取代：
-
-    - 它返回的是 **SSE（`text/event-stream`）**，事件里装的是 **`audioUrl`**——
-      即"分片就绪通知"，**不是音频流本身**。客户端每片还要再发一次 HTTP 请求去下载，
-      比直接透传音频流更慢（每片一次往返）。
-    - 而 `/synthesize-stream` 直接下发**裸 PCM**（`audio/L16`），
-      客户端用 AudioTrack 边收边播，首声约 0.5s。
-
-    **已确认三端（MemoryServerTTS / MemoryServer / Memory）无任何调用方**，
-    仅历史文档仍引用。保留端点只为不破坏旧文档/外部调用方，
-    后续可安全删除（连同 `TTSStreamRequest` 与 `server.py` 里同名的
-    WebSocket `/api/v1/tts/stream`）。
-
-    SSE 事件格式（仅存档）：
-    - event: chunk    data: {"index": 0, "text": "...", "audioUrl": "...", "duration": 2.5}
-    - event: done     data: {"totalChunks": 5, "totalDuration": 12.3}
-    - event: error    data: {"message": "..."}
-    """
-    text = req.text.strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
-
-    # 分句
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    chunks = []
-    buf = ""
-    max_chars = req.max_chunk_chars or 200
-    for s in sentences:
-        if buf and len(buf) + len(s) > max_chars:
-            chunks.append(buf.strip())
-            buf = s
-        else:
-            buf = buf + " " + s if buf else s
-    if buf.strip():
-        chunks.append(buf.strip())
-
-    if not chunks:
-        chunks = [text]
-
-    async def event_stream():
-        total_duration = 0.0
-        audio_dir = Path("tts-audio")
-        audio_dir.mkdir(parents=True, exist_ok=True)
-
-        for i, chunk_text in enumerate(chunks):
-            try:
-                # 极短文本补标点
-                ct = chunk_text
-                if len(ct) < 80 and not re.search(r'[.!?]$', ct):
-                    ct = ct.rstrip(',;:') + '.'
-
-                async with request.app.state.model_lock:
-                    wavs, sr, meta = request.app.state.model.generate(
-                        text=ct, voice=req.voice, language=req.language,
-                        instructions=req.instructions if i == 0 else None,
-                        # 流式默认不校验（实时性优先），客户端可显式开启
-                        verify=req.verify if req.verify is not None else False,
-                    )
-                wav = wavs[0]
-                duration = len(wav) / sr
-                total_duration += duration
-
-                # 保存到文件
-                filename = f"tts_stream_{uuid.uuid4().hex}.wav"
-                filepath = audio_dir / filename
-                sf.write(str(filepath), wav, sr)
-
-                # 通过 SSE 推送音频信息
-                event_data = {
-                    "index": i,
-                    "text": chunk_text,
-                    "audioUrl": f"/tts-audio/{filename}",
-                    "duration": round(duration, 2),
-                    "verified": meta.get("verified"),
-                    "attempts": meta.get("attempts"),
-                }
-                yield f"event: chunk\ndata: {json.dumps(event_data)}\n\n"
-
-            except Exception as e:
-                error_data = {"index": i, "message": str(e)}
-                yield f"event: error\ndata: {json.dumps(error_data)}\n\n"
-                return
-
-        done_data = {"totalChunks": len(chunks), "totalDuration": round(total_duration, 2)}
-        yield f"event: done\ndata: {json.dumps(done_data)}\n\n"
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        }
-    )
 
 @router.post("/synthesize-stream")
 async def synthesize_stream_pcm(request: Request, req: TTSStreamPcmRequest):
